@@ -1,0 +1,3 @@
+[submodule "booster_soccer_showdown"]
+	path = booster_soccer_showdown
+	url = https://github.com/ArenaX-Labs/booster_soccer_showdown.git
