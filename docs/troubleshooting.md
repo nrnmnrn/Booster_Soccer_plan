@@ -47,7 +47,10 @@
 
 | 問題 | 解決方案 |
 |------|----------|
-| *尚無記錄* | - |
+| `'NoneType' has no attribute 'eglQueryString'` | Headless 環境。在 import mujoco **之前**設 `MUJOCO_GL=osmesa` 或 `disabled` |
+| `Cannot use OSMesa... PYOPENGL_PLATFORM is 'egl'` | 環境變數衝突。同時設 `MUJOCO_GL=osmesa` + `PYOPENGL_PLATFORM=osmesa` |
+| `'NoneType' has no attribute 'eglGetCurrentContext'` | OpenGL 已被其他套件 import。`restartPython()` 後**第一行**設環境變數 |
+| `module 'mujoco' has no attribute '_enums'` | 安裝損壞。`pip uninstall mujoco mujoco-mjx -y` 後 `pip install --no-cache-dir` |
 
 ---
 
@@ -102,6 +105,19 @@ print(f"jax={jax.__version__}, jaxlib={jaxlib.__version__}, numpy={np.__version_
 assert jax.__version__ == jaxlib.__version__, "JAX/jaxlib 版本不一致！"
 print(f"Devices: {jax.devices()}")  # 預期: [CudaDevice(id=0)]
 ```
+
+---
+
+## pip 快取問題
+
+當遇到「安裝成功但 import 失敗」的詭異情況，可能是 pip 快取損壞：
+
+| 指令 | 用途 |
+|------|------|
+| `pip install --no-cache-dir <pkg>` | 繞過快取，強制重新下載 |
+| `pip cache purge` | 清空整個 pip 快取 |
+
+**常見原因**：下載中斷導致不完整 wheel、不同 Python 版本 wheel 混用、多次安裝/解除安裝殘留。
 
 ---
 
