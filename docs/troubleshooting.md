@@ -36,6 +36,8 @@
 | `jax_cuda12_plugin not compatible with jaxlib` + Segfault | JAX 三件套版本必須一致：`jax==0.4.38 jaxlib==0.4.38 jax-cuda12-plugin==0.4.38` |
 | `jax requires jaxlib >= 0.8.2` | 其他套件升級了 jax。使用 requirements.txt 一次性安裝所有套件 |
 | `jax[cuda12]==0.4.38` 安裝後版本不對 | extras 語法不固定 jaxlib 版本，必須明確指定三個套件版本 |
+| `vmap got inconsistent sizes for array axes` | 常數陣列（如 `player_team`）未廣播到 batch 維度。用 `jnp.tile(arr[None,:], (num_envs,1))` |
+| `IndexError: f argument "3" with type "q"` | `mjx.step()` 不支援批量輸入。需用 `jax.vmap(mjx.step, in_axes=(None, 0))` 包裝 |
 
 ### PyTorch
 
@@ -51,6 +53,12 @@
 | `Cannot use OSMesa... PYOPENGL_PLATFORM is 'egl'` | **Databricks 無 OSMesa**。改用 `MUJOCO_GL=disabled`（MJX 訓練不需要渲染） |
 | `'NoneType' has no attribute 'eglGetCurrentContext'` | OpenGL 已被其他套件 import。`restartPython()` 後**第一行**設環境變數 |
 | `module 'mujoco' has no attribute '_enums'` | 安裝損壞。`pip uninstall mujoco mujoco-mjx -y` 後 `pip install --no-cache-dir` |
+| `(mjGEOM_CYLINDER, mjGEOM_BOX) collisions not implemented` | **MJX 不支援 cylinder**！將 XML 中所有 `type="cylinder"` 改為 `type="capsule"`，見下方說明 |
+
+> **⚠️ MJX 碰撞限制**：MJX 只支援部分 geom 碰撞對。**Cylinder 與任何類型都不支援**。
+> - ✅ 支援：sphere, capsule, box, plane 互相組合（大多數）
+> - ❌ 不支援：cylinder, mesh, hfield
+> - 解法：用 `capsule` 替代 `cylinder`（`size="r"` + `fromto="..."` 語法）
 
 > **⚠️ Databricks 重要**：必須使用 `MUJOCO_GL=disabled`，OSMesa 在 Databricks Runtime 不可用。
 

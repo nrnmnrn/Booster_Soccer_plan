@@ -13,6 +13,25 @@
 
 ## 上次 Session 摘要
 
+### 2026-01-07 (Session 3)
+
+**完成項目**：
+- ✅ Databricks GPU 驗證成功（JAX 0.4.38 + CudaDevice）
+- ✅ MJXSoccerEnv reset/step 正常運作（1024 並行環境）
+- ✅ 修復 MJX 碰撞限制（cylinder → capsule）
+- ✅ 修復 vmap batch 維度錯誤（player_team/task_one_hot 廣播）
+- ✅ 修復 mjx.step 批量執行（需 vmap 包裝）
+
+**待解決**：
+- ⚠️ obs shape 是 83 而非 87（缺少 4 維，待調查官方 preprocessor）
+
+**關鍵發現**：
+- MJX 不支援 `cylinder` geom 類型，必須用 `capsule` 替代
+- `mjx.step()` 只接受單一環境，批量需用 `jax.vmap(mjx.step, in_axes=(None, 0))`
+- 常數陣列必須用 `jnp.tile` 廣播到 batch 維度才能參與 vmap
+
+---
+
 ### 2026-01-07 (Session 2)
 
 **完成項目**：
@@ -58,33 +77,16 @@
 
 > 下一個 Claude session 應執行以下任務
 
-### 優先級 1：在 Databricks 驗證新代碼
-```python
-# 上傳 src/notebooks/01_environment_validation.ipynb 到 Databricks 執行
-# 確認 JAX GPU 和 MuJoCo 正常運作
-```
+### 優先級 1：調查 obs 維度差異（83 vs 87）
+- 對比官方 `preprocessor.py` 找出缺少的 4 維
+- 修正 `src/mjx/preprocessor_jax.py`
 
-### 優先級 2：測試 MJX 環境
-```python
-# 上傳 src/mjx/ 目錄到 Databricks
-import os
-os.environ["MUJOCO_GL"] = "disabled"
-
-from src.mjx.soccer_env import MJXSoccerEnv
-import jax
-
-env = MJXSoccerEnv(num_envs=1024)
-key = jax.random.PRNGKey(0)
-state, obs = env.reset(key)
-print(f"obs shape: {obs.shape}")  # 預期: (1024, 87)
-```
-
-### 優先級 3：設計 Reward 函數
+### 優先級 2：設計 Reward 函數
 - 在 `soccer_env.py` 的 `_compute_reward` 方法中實現
 - 建議從簡單獎勵開始：站立獎勵 + 朝向球獎勵
 - 參考官方 benchmark 的獎勵設計
 
-### 優先級 4：實現 PPO 訓練循環
+### 優先級 3：實現 PPO 訓練循環
 - 創建 `src/training/ppo_mjx.py`
 - 使用 JAX 實現 PPO（或使用 brax/mujoco_playground 的實現）
 
@@ -95,8 +97,8 @@ print(f"obs shape: {obs.shape}")  # 預期: (1024, 87)
 | 問題 | 狀態 | 備註 |
 |------|------|------|
 | ~~OSMesa 是否正常運作？~~ | ✅ 已解決 | 必須用 `MUJOCO_GL=disabled` |
-| MJX 能否載入 soccer_env.xml？ | 待驗證 | 需在 Databricks 上測試 |
-| 87 維輸出是否與官方一致？ | 待驗證 | 需對比 NumPy 版本輸出 |
+| ~~MJX 能否載入 soccer_env.xml？~~ | ✅ 已解決 | 需改 cylinder → capsule |
+| obs 維度 83 vs 87 | ⚠️ 待調查 | 缺少 4 維，需對比官方 preprocessor |
 | Reward 函數設計 | 待設計 | 需要人工參與設計 |
 
 ---

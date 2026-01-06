@@ -209,8 +209,13 @@ class MJXSoccerEnv:
 
     @partial(jax.jit, static_argnums=(0,))
     def _mjx_step(self, mjx_data: mjx.Data) -> mjx.Data:
-        """JIT 編譯的 MJX step"""
-        return mjx.step(self.mjx_model, mjx_data)
+        """JIT 編譯的 MJX step（支援批量環境）"""
+        if self.num_envs > 1:
+            # 批量執行：model 不變，data 按 batch 軸映射
+            batched_step = jax.vmap(mjx.step, in_axes=(None, 0))
+            return batched_step(self.mjx_model, mjx_data)
+        else:
+            return mjx.step(self.mjx_model, mjx_data)
 
     # =========================================================================
     # Observation
@@ -261,6 +266,19 @@ class MJXSoccerEnv:
         # 門將/目標/防守者（MJX 預訓練階段可用零值）
         zeros_3 = jnp.zeros_like(robot_xpos)
 
+        # 廣播 player_team 和 task_one_hot 到 batch 維度
+        # 原始 shape: (2,) 和 (3,)，需要變成 (num_envs, 2) 和 (num_envs, 3)
+        if self.num_envs > 1:
+            player_team_batched = jnp.tile(
+                self.player_team[None, :], (self.num_envs, 1)
+            )
+            task_one_hot_batched = jnp.tile(
+                self.task_one_hot[None, :], (self.num_envs, 1)
+            )
+        else:
+            player_team_batched = self.player_team
+            task_one_hot_batched = self.task_one_hot
+
         return EnvInfo(
             robot_quat=robot_quat,
             robot_gyro=robot_gyro,
@@ -279,8 +297,8 @@ class MJXSoccerEnv:
             target_xpos=ball_xpos,  # 預訓練階段：目標 = 球
             target_vel=ball_velp,
             defender_xpos=zeros_3,
-            player_team=self.player_team,
-            task_one_hot=self.task_one_hot,
+            player_team=player_team_batched,
+            task_one_hot=task_one_hot_batched,
         )
 
     # =========================================================================
