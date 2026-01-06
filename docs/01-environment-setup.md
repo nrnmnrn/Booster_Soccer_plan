@@ -19,24 +19,44 @@
 
 ### 安裝依賴
 
-在 Databricks Notebook 開頭執行：
+#### 方法 1：requirements.txt + Cluster Library（推薦）
+
+使用專案根目錄的 `requirements.txt` 作為 Cluster Library：
+
+1. 上傳 `requirements.txt` 到 Workspace：`/Workspace/Users/<email>/booster-soccer/requirements.txt`
+2. **Compute** → 選擇 cluster → **Libraries** → **Install New**
+3. Library Source: **Workspace** → 選擇 `requirements.txt`
+4. **Install**
+
+> ⚠️ **不要用 Libraries UI 逐一安裝套件**，會導致依賴版本錯亂。詳見 [troubleshooting.md](./troubleshooting.md#databricks-套件安裝摘要)
+
+#### 方法 2：Notebook %pip（開發測試用）
 
 ```python
-# 安裝核心套件
-%pip install mujoco mujoco-mjx jax[cuda12] flax optax wandb flashbax
+# 一次性安裝所有套件（必須在同一個命令！）
+%pip install "numpy<2" \
+    jax==0.4.38 jaxlib==0.4.38 jax-cuda12-plugin==0.4.38 \
+    flax==0.10.2 optax==0.2.4 brax==0.12.1 \
+    mujoco==3.2.6 mujoco-mjx==3.2.6 \
+    wandb==0.19.1 mlflow==2.19.0 \
+    stable-baselines3 distrax imageio tqdm "pynvml>=12.0.0"
 
-# 驗證 JAX GPU
-import jax
-print(f"JAX devices: {jax.devices()}")
-# 預期輸出: [CudaDevice(id=0)]
+dbutils.library.restartPython()
+```
 
-# 驗證 MuJoCo
+#### 驗證安裝
+
+```python
+# 驗證 JAX（檢查版本一致性）
+import jax, jaxlib
+print(f"JAX {jax.__version__}, jaxlib {jaxlib.__version__}")
+assert jax.__version__ == jaxlib.__version__, "版本不一致！"
+print(f"Devices: {jax.devices()}")  # 預期: [CudaDevice(id=0)]
+
+# 驗證 MuJoCo / MJX
 import mujoco
-print(f"MuJoCo version: {mujoco.__version__}")
-
-# 驗證 MJX
 from mujoco import mjx
-print("MJX available:", hasattr(mjx, 'put_model'))
+print(f"MuJoCo {mujoco.__version__}")
 ```
 
 ### MuJoCo Headless 渲染設置
@@ -241,8 +261,20 @@ sai_key = dbutils.secrets.get(scope="booster_soccer", key="sai_api_key")
 # 檢查 CUDA 版本
 !nvidia-smi
 
-# 確保安裝正確版本的 JAX
-pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# 確保 JAX 三件套版本一致
+%pip install jax==0.4.38 jaxlib==0.4.38 jax-cuda12-plugin==0.4.38 "numpy<2"
+dbutils.library.restartPython()
+```
+
+### Q: JAX/jaxlib 版本不匹配錯誤？
+
+```python
+# 檢查版本
+import jax, jaxlib
+print(f"jax={jax.__version__}, jaxlib={jaxlib.__version__}")
+
+# 如果版本不一致，重新安裝（一次性安裝所有套件）
+# 詳見 troubleshooting.md#databricks-套件安裝摘要
 ```
 
 ### Q: MuJoCo 渲染錯誤？
@@ -280,29 +312,60 @@ pip install sai-mujoco
 ### Dockerfile
 
 ```dockerfile
-# 基於 Databricks 官方 GPU Image（確保與 Spark 相容）
-FROM databricksruntime/gpu-ml:16.4-LTS
+# 使用 NVIDIA NGC JAX image（預配置 JAX + CUDA + cuDNN）
+FROM nvcr.io/nvidia/jax:25.01-py3
 
-# 安裝 JAX 和 MuJoCo 依賴
-RUN pip install --no-cache-dir \
-    "jax[cuda12]==0.4.23" \
-    -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# 防止互動式提示
+ENV DEBIAN_FRONTEND=noninteractive
 
-RUN pip install --no-cache-dir \
-    mujoco mujoco-mjx brax flax optax wandb pynvml flashbax
-
-# 安裝 EGL 渲染所需的系統庫
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libegl1-mesa \
+# 安裝 MuJoCo 渲染依賴（Ubuntu 24.04 套件名稱）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
     libosmesa6 \
+    libglfw3 \
+    libglew-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 設置環境變數
+# 安裝額外 ML 依賴（JAX/Flax 已包含在 NGC image 中）
+# 注意：NGC image 已有 JAX，這裡只補充其他套件
+RUN pip install --no-cache-dir \
+    "mujoco==3.2.6" \
+    "mujoco-mjx==3.2.6" \
+    "brax==0.12.1" \
+    "optax==0.2.4" \
+    "wandb==0.19.1" \
+    "mlflow==2.19.0" \
+    "pynvml>=12.0.0" \
+    "stable-baselines3" \
+    "distrax" \
+    "imageio" \
+    "tqdm"
+
+# 安裝 PyTorch（用於最終微調）
+RUN pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
+# JAX/XLA 優化環境變數
 ENV XLA_PYTHON_CLIENT_MEM_FRACTION=0.75
 ENV JAX_PREALLOCATE=false
 ENV MUJOCO_GL=egl
+ENV PYTHONUNBUFFERED=1
+
+# Databricks 相容性
+ENV DATABRICKS_RUNTIME_VERSION=16.4
+
+WORKDIR /workspace
+
+# 健康檢查腳本
+RUN printf '#!/bin/bash\n\
+python -c "import jax; print(f\"JAX devices: {jax.devices()}\")" \n\
+python -c "import mujoco; print(f\"MuJoCo version: {mujoco.__version__}\")" \n\
+python -c "import torch; print(f\"PyTorch CUDA: {torch.cuda.is_available()}\")" \n\
+' > /usr/local/bin/healthcheck.sh && chmod +x /usr/local/bin/healthcheck.sh
+
+CMD ["/bin/bash"]
 ```
+
+> **NGC JAX 25.01 已包含**：JAX 0.4.38、Flax 0.10.2、Python 3.12、CUDA 12.8
 
 ### Build & Push
 
@@ -342,23 +405,30 @@ docker push your-registry/booster-rl:v1
 
 ## 備用方案：Init Script
 
-如果 Docker Image 建置遇到困難，可暫時使用 Init Script。
+> ⚠️ **建議優先使用 requirements.txt + Cluster Library**。Init Script 已被 Databricks 標記為不推薦做法。
 
 ### Init Script (install_mjx.sh)
 
 ```bash
 #!/bin/bash
-# 核心套件安裝
-pip install "jax[cuda12]==0.4.23" \
-  -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install mujoco mujoco-mjx brax flax optax wandb pynvml flashbax
+# 限制 NumPy 版本 + JAX 三件套（必須同版本）
+pip install --no-cache-dir "numpy<2" \
+  jax==0.4.38 jaxlib==0.4.38 jax-cuda12-plugin==0.4.38 \
+  flax==0.10.2 optax==0.2.4 brax==0.12.1 \
+  mujoco==3.2.6 mujoco-mjx==3.2.6 \
+  wandb==0.19.1 mlflow==2.19.0 "pynvml>=12.0.0" \
+  stable-baselines3 distrax imageio tqdm
+
+# PyTorch（用於最終微調）
+pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
 # JAX/XLA 記憶體和效能設置
 echo "export XLA_PYTHON_CLIENT_MEM_FRACTION=0.75" >> /etc/profile
 echo "export JAX_PREALLOCATE=false" >> /etc/profile
-echo "export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda'" >> /etc/profile
 echo "export MUJOCO_GL=egl" >> /etc/profile
 ```
+
+> **注意**：Init Script 每次啟動都會重新執行 pip install，建議改用 requirements.txt + Cluster Library。
 
 ### 上傳到 Unity Catalog Volume
 

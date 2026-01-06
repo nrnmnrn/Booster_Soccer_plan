@@ -193,23 +193,29 @@ databricks instance-pools create --json '{
 
 **備用方案：Init Script (install_mjx.sh)**
 
-如果 Docker Image 尚未準備好，可暫時使用 Init Script：
+> ⚠️ **建議優先使用 Docker**：詳見 [01-environment-setup.md](./01-environment-setup.md)。
 
 ```bash
 #!/bin/bash
-# 核心套件安裝
-pip install "jax[cuda12]==0.4.23" \
-  -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install mujoco mujoco-mjx brax flax optax wandb pynvml flashbax
+# 核心套件安裝（版本與 Dockerfile 保持一致）
+pip install --no-cache-dir \
+  "mujoco==3.2.6" \
+  "mujoco-mjx==3.2.6" \
+  "brax==0.12.1" \
+  "optax==0.2.4" \
+  "wandb==0.19.1" \
+  "mlflow==2.19.0" \
+  "pynvml>=12.0.0"
 
-# JAX/XLA 記憶體和效能設置（寫入 /etc/profile 確保所有進程都能讀取）
-echo "export XLA_PYTHON_CLIENT_MEM_FRACTION=0.75" >> /etc/profile   # 保守值，留給渲染
-echo "export JAX_PREALLOCATE=false" >> /etc/profile                  # 避免預分配
+# PyTorch（用於最終微調）
+pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
+# JAX/XLA 記憶體和效能設置
+echo "export XLA_PYTHON_CLIENT_MEM_FRACTION=0.75" >> /etc/profile
+echo "export JAX_PREALLOCATE=false" >> /etc/profile
 echo "export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda'" >> /etc/profile
-echo "export MUJOCO_GL=egl" >> /etc/profile                          # Headless 渲染
+echo "export MUJOCO_GL=egl" >> /etc/profile
 ```
-
-> **建議**：Day 1 就使用 Docker 環境以獲得更快的啟動速度和環境一致性。詳見 [01-environment-setup.md](./01-environment-setup.md)。
 
 **監控項目：**
 - `train/reward_mean`

@@ -1,0 +1,120 @@
+# Troubleshooting 避雷指南
+
+本文檔記錄開發過程中遇到的常見問題與解決方案，幫助快速排除錯誤。
+
+---
+
+## 環境問題
+
+### Python / Conda
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+### CUDA / GPU
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+### Databricks
+
+| 問題 | 解決方案 |
+|------|----------|
+| `numpy.dtype size changed (Expected 96, got 88)` | NumPy 2.x ABI 不兼容。使用 `numpy<2` 約束，詳見 [套件安裝摘要](#databricks-套件安裝摘要) |
+| Libraries UI 安裝後套件版本錯亂 | 不要用 UI 逐一安裝，改用 requirements.txt 作為 Cluster Library |
+
+---
+
+## 套件衝突
+
+### JAX / MJX
+
+| 問題 | 解決方案 |
+|------|----------|
+| `jax_cuda12_plugin not compatible with jaxlib` + Segfault | JAX 三件套版本必須一致：`jax==0.4.38 jaxlib==0.4.38 jax-cuda12-plugin==0.4.38` |
+| `jax requires jaxlib >= 0.8.2` | 其他套件升級了 jax。使用 requirements.txt 一次性安裝所有套件 |
+| `jax[cuda12]==0.4.38` 安裝後版本不對 | extras 語法不固定 jaxlib 版本，必須明確指定三個套件版本 |
+
+### PyTorch
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+### MuJoCo
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+---
+
+## 邏輯錯誤
+
+### Preprocessor
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+### 獎勵函數
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+### 模型轉換 (JAX → PyTorch)
+
+| 問題 | 解決方案 |
+|------|----------|
+| *尚無記錄* | - |
+
+---
+
+## Databricks 套件安裝摘要
+
+### 問題根源
+
+| 問題 | 原因 |
+|------|------|
+| NumPy ABI 不兼容 | Databricks 預裝 pandas 1.5.3 用 NumPy 1.x 編譯，NumPy 2.x 的 dtype 結構變更導致崩潰 |
+| JAX 版本不匹配 | `jax[cuda12]` extras 不固定 jaxlib 版本，pip 會升級到最新版 |
+| Libraries UI 問題 | 逐一安裝套件，後安裝的會觸發依賴升級 |
+
+### 解決方案：requirements.txt + Cluster Library
+
+1. 建立 `requirements.txt`（見專案根目錄）
+2. 上傳到 Workspace：`/Workspace/Users/<email>/booster-soccer/requirements.txt`
+3. **Compute** → cluster → **Libraries** → **Install New** → **Workspace** → 選擇檔案
+
+**關鍵原則**：
+- 所有套件在**同一個 pip 事務**安裝
+- JAX 三件套版本必須**完全一致**
+- 使用 `numpy<2` 約束
+
+### 驗證腳本
+
+```python
+import jax, jaxlib, numpy as np
+print(f"jax={jax.__version__}, jaxlib={jaxlib.__version__}, numpy={np.__version__}")
+assert jax.__version__ == jaxlib.__version__, "JAX/jaxlib 版本不一致！"
+print(f"Devices: {jax.devices()}")  # 預期: [CudaDevice(id=0)]
+```
+
+---
+
+## 如何新增條目
+
+當遇到並解決問題後，請按以下格式新增：
+
+```markdown
+| `錯誤訊息或問題描述` | 解決方案說明。如有相關連結可附上。 |
+```
+
+**範例：**
+
+```markdown
+| `CUDA out of memory` | 降低 batch size 或設置 `XLA_PYTHON_CLIENT_MEM_FRACTION=0.75` |
+```
