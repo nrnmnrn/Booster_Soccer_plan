@@ -120,12 +120,11 @@
 - [01-environment-setup.md](./01-environment-setup.md) - 環境設置指南
 - [README.md](./README.md) - 完整進度 checklist
 
-### 新增文件（本 Session）
+### MJX 環境文件
 
 | 文件 | 說明 |
 |------|------|
-| `src/notebooks/01_environment_validation.ipynb` | JAX/MuJoCo 環境驗證 |
-| `src/notebooks/02_xml_loading.ipynb` | XML + MJX 載入測試 |
-| `src/mjx/assets/soccer_env.xml` | MJX 足球環境 XML |
-| `src/mjx/preprocessor_jax.py` | JAX 版本 87 維 Preprocessor |
-| `src/mjx/soccer_env.py` | MJX 環境類 |
+| `src/mjx/soccer_env.py` | MJX 環境類（reset/step） |
+| `src/mjx/preprocessor_jax.py` | JAX 版本 Preprocessor |
+| `src/mjx/assets/soccer_env.xml` | 12 DOF 機器人 + 球 + 球門 |
+| `src/notebooks/01_environment_validation.ipynb` | Databricks 環境驗證 |
