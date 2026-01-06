@@ -1,42 +1,42 @@
-# Python
+# === Python ===
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
+*.egg-info/
+*.egg
 build/
-develop-eggs/
 dist/
+.eggs/
+develop-eggs/
 downloads/
 eggs/
-.eggs/
 lib/
 lib64/
 parts/
 sdist/
 var/
 wheels/
-*.egg-info/
 .installed.cfg
-*.egg
+.Python
 
-# Virtual environments
+# === Virtual environments ===
 venv/
+.venv/
 ENV/
 env/
-.venv/
 
-# IDE
+# === IDE ===
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
-# Jupyter
+# === Jupyter ===
 .ipynb_checkpoints/
 
-# Training outputs
+# === Training outputs ===
 checkpoints/
 logs/
 *.ckpt
@@ -44,10 +44,20 @@ logs/
 *.pt
 *.pth
 
-# Experiment tracking
+# === Experiment tracking ===
 wandb/
 mlruns/
 
-# OS
+# === Databricks ===
+.databricks/
+scratch/**
+!scratch/README.md
+**/explorations/**
+!**/explorations/README.md
+
+# === OS ===
 .DS_Store
 Thumbs.db
+
+# === Large files ===
+*.tar
