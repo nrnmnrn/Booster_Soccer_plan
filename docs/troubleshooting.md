@@ -47,10 +47,12 @@
 
 | 問題 | 解決方案 |
 |------|----------|
-| `'NoneType' has no attribute 'eglQueryString'` | Headless 環境。在 import mujoco **之前**設 `MUJOCO_GL=osmesa` 或 `disabled` |
-| `Cannot use OSMesa... PYOPENGL_PLATFORM is 'egl'` | 環境變數衝突。同時設 `MUJOCO_GL=osmesa` + `PYOPENGL_PLATFORM=osmesa` |
+| `'NoneType' has no attribute 'eglQueryString'` | Headless 環境。在 import mujoco **之前**設 `MUJOCO_GL=disabled` |
+| `Cannot use OSMesa... PYOPENGL_PLATFORM is 'egl'` | **Databricks 無 OSMesa**。改用 `MUJOCO_GL=disabled`（MJX 訓練不需要渲染） |
 | `'NoneType' has no attribute 'eglGetCurrentContext'` | OpenGL 已被其他套件 import。`restartPython()` 後**第一行**設環境變數 |
 | `module 'mujoco' has no attribute '_enums'` | 安裝損壞。`pip uninstall mujoco mujoco-mjx -y` 後 `pip install --no-cache-dir` |
+
+> **⚠️ Databricks 重要**：必須使用 `MUJOCO_GL=disabled`，OSMesa 在 Databricks Runtime 不可用。
 
 ---
 
