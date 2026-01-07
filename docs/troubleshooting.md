@@ -45,6 +45,21 @@
 |------|----------|
 | *尚無記錄* | - |
 
+### SAI 官方環境
+
+| 問題 | 解決方案 |
+|------|----------|
+| `Environment 'LowerT1GoaliePenaltyKick' doesn't exist` | **SAI 套件版本太舊**！需要最新版 sai-mujoco/sai-rl + NumPy 2.x。見下方說明 |
+| `TypeError: SAIClient.__init__() got an unexpected keyword argument 'scene_id'` | sai-rl 版本太舊。需升級到最新版（0.1.36+） |
+| `No module named 'sai_rl'` | 在 `requirements.txt` 添加 `sai-rl`，然後重新安裝 Cluster Library |
+| `AuthenticationError: No API key provided` | 設置 `SAI_API_KEY` 環境變數或傳入 `api_key` 參數 |
+
+> **⚠️ SAI 套件版本要求（2026-01）**：
+> - 官方環境需要 **NumPy 2.x**（numpy==2.1.3）
+> - sai-mujoco 0.1.4 / sai-rl 0.1.5 是 2025-06 的舊版本，無法正常運作
+> - 必須使用最新版並配合 NumPy 2.x，不能用 `numpy<2` 約束
+> - 如果 pandas ABI 崩潰，在 notebook 開頭執行 `%pip install --upgrade pandas`
+
 ### MuJoCo
 
 | 問題 | 解決方案 |
@@ -93,8 +108,8 @@
 
 | 問題 | 原因 |
 |------|------|
-| NumPy ABI 不兼容 | Databricks 預裝 pandas 1.5.3 用 NumPy 1.x 編譯，NumPy 2.x 的 dtype 結構變更導致崩潰 |
-| JAX 版本不匹配 | `jax[cuda12]` extras 不固定 jaxlib 版本，pip 會升級到最新版 |
+| SAI 環境無法載入 | sai-mujoco/sai-rl 需要 NumPy 2.x，舊版本無法正常註冊環境 |
+| NumPy ABI 不兼容 | Databricks 預裝 pandas 可能與 NumPy 2.x 不兼容（需升級 pandas） |
 | Libraries UI 問題 | 逐一安裝套件，後安裝的會觸發依賴升級 |
 
 ### 解決方案：requirements.txt + Cluster Library
@@ -104,17 +119,29 @@
 3. **Compute** → cluster → **Libraries** → **Install New** → **Workspace** → 選擇檔案
 
 **關鍵原則**：
+- **官方 SAI 套件優先**，使用最新版 + NumPy 2.x
+- 其他套件**不指定版本**，讓 pip 自動解決依賴
 - 所有套件在**同一個 pip 事務**安裝
-- JAX 三件套版本必須**完全一致**
-- 使用 `numpy<2` 約束
+
+**如果 pandas 崩潰**：
+```python
+%pip install --upgrade pandas
+dbutils.library.restartPython()
+```
 
 ### 驗證腳本
 
 ```python
-import jax, jaxlib, numpy as np
-print(f"jax={jax.__version__}, jaxlib={jaxlib.__version__}, numpy={np.__version__}")
-assert jax.__version__ == jaxlib.__version__, "JAX/jaxlib 版本不一致！"
-print(f"Devices: {jax.devices()}")  # 預期: [CudaDevice(id=0)]
+import numpy as np
+import sai_rl
+print(f"numpy={np.__version__}, sai_rl={sai_rl.__version__}")
+
+# 測試 SAI 環境
+from sai_rl import SAIClient
+sai = SAIClient(comp_id="lower-t1-penalty-kick-goalie", api_key="YOUR_KEY")
+env = sai.make_env(render_mode=None)
+obs, info = env.reset()
+print(f"task_index: {info.get('task_index')}")
 ```
 
 ---
