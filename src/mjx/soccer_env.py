@@ -115,6 +115,14 @@ class MJXSoccerEnv:
             model, mujoco.mjtObj.mjOBJ_SITE, "imu"
         )
 
+        # Foot Body IDs（用於 reward 計算）
+        self.left_foot_body_id = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_BODY, "left_foot_link"
+        )
+        self.right_foot_body_id = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_BODY, "right_foot_link"
+        )
+
         # Joint addresses（用於從 qpos/qvel 提取關節數據）
         # freejoint 佔 7 DOF (qpos) / 6 DOF (qvel)
         self.robot_qpos_start = 7  # 跳過 root freejoint
@@ -302,7 +310,7 @@ class MJXSoccerEnv:
         )
 
     # =========================================================================
-    # Reward (TODO: Human collaboration point)
+    # Reward
     # =========================================================================
 
     def _compute_reward(
@@ -310,11 +318,70 @@ class MJXSoccerEnv:
         mjx_data: mjx.Data,
         action: jnp.ndarray
     ) -> jnp.ndarray:
-        """計算獎勵
+        """計算 MJX 預訓練獎勵
 
-        TODO(human): 這裡需要設計獎勵函數
+        獎勵組件（對齊官方評估指標）：
+        - r_stand:    站立獎勵（軀幹高度）    | 官方: robot_fallen -1.5
+        - r_approach: 靠近球獎勵              | 官方: robot_distance_ball +0.25
+        - r_ball_vel: 球朝向球門速度          | 官方: ball_vel_twd_goal +1.5
+        - r_kick:     腳接觸球獎勵            | goal_scored proxy
+        - r_energy:   能量懲罰                | 穩定性
+        - r_time:     時間懲罰                | 官方: steps -1.0
+
+        Returns:
+            reward: shape (num_envs,)
         """
-        return jnp.zeros(self.num_envs)
+        # === R1: Standing Reward ===
+        trunk_height = mjx_data.xpos[..., self.trunk_body_id, 2]
+        r_stand = jnp.where(trunk_height > 0.35, 0.5, -1.5)
+
+        # === R2: Approach Ball ===
+        robot_xy = mjx_data.xpos[..., self.trunk_body_id, :2]
+        ball_xy = mjx_data.xpos[..., self.ball_body_id, :2]
+        ball_dist = jnp.linalg.norm(robot_xy - ball_xy, axis=-1)
+        r_approach = 0.25 * jnp.exp(-ball_dist)
+
+        # === R3: Ball Velocity Toward Goal ===
+        # TODO(human): 決定攻擊方向邏輯
+        # 目前假設 player_team=0 攻擊 goal_0（正 X 方向）
+        # 如需修改，請實現 _get_attack_goal_id() 方法
+        attack_goal_xy = mjx_data.xpos[..., self.goal_0_body_id, :2]
+
+        ball_to_goal = attack_goal_xy - ball_xy
+        ball_to_goal_norm = ball_to_goal / (
+            jnp.linalg.norm(ball_to_goal, axis=-1, keepdims=True) + 1e-6
+        )
+
+        ball_vel_xy = mjx_data.cvel[..., self.ball_body_id, 3:5]
+        vel_toward_goal = jnp.sum(ball_vel_xy * ball_to_goal_norm, axis=-1)
+        r_ball_vel = 1.5 * jnp.clip(vel_toward_goal, 0.0, 2.0) / 2.0
+
+        # === R4: Foot-Ball Contact ===
+        left_foot_xy = mjx_data.xpos[..., self.left_foot_body_id, :2]
+        right_foot_xy = mjx_data.xpos[..., self.right_foot_body_id, :2]
+        left_dist = jnp.linalg.norm(left_foot_xy - ball_xy, axis=-1)
+        right_dist = jnp.linalg.norm(right_foot_xy - ball_xy, axis=-1)
+        foot_ball_dist = jnp.minimum(left_dist, right_dist)
+        r_kick = jnp.where(foot_ball_dist < 0.2, 0.2, 0.0)
+
+        # === R5: Energy Penalty ===
+        r_energy = -0.01 * jnp.sum(action ** 2, axis=-1)
+
+        # === R6: Time Penalty ===
+        r_time = jnp.full((self.num_envs,), -0.01)
+
+        # === Combine Rewards ===
+        # 權重設計：站立 > 靠近球 > 踢球方向 > 接觸 > 懲罰
+        reward = (
+            r_stand * 0.4 +
+            r_approach * 0.3 +
+            r_ball_vel * 0.2 +
+            r_kick * 0.05 +
+            r_energy +
+            r_time
+        )
+
+        return reward
 
     # =========================================================================
     # Termination

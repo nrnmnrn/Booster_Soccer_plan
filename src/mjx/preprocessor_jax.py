@@ -25,8 +25,12 @@
     - target_xpos_rel_robot: 3
     - target_velp_rel_robot: 3
     - defender_xpos: 3
-    - task_one_hot: 3
-    總計: 84 + 3 = 87
+    - task_one_hot: 3 (或 7，待驗證 info['task_index'] 維度)
+    總計: 80 + 3 = 83 (若 task_index=7 則為 80 + 7 = 87)
+
+    ⚠️ 注意：官方 main.py 使用 n_features=87，但實際計算為 83 維。
+    需要在 Databricks 上驗證 info['task_index'] 的真實維度。
+    見 src/notebooks/03_task_index_validation.ipynb
 """
 
 import jax

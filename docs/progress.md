@@ -13,6 +13,33 @@
 
 ## 上次 Session 摘要
 
+### 2026-01-07 (Session 4)
+
+**完成項目**：
+- ✅ 分析 obs 維度差異原因（83 vs 87）
+  - 發現：官方 preprocessor 實際輸出 83 維
+  - `n_features=87` 可能是硬編碼錯誤，或 `info['task_index']` 是 7 維
+- ✅ 創建維度驗證 Notebook (`src/notebooks/03_task_index_validation.ipynb`)
+- ✅ 更新 `preprocessor_jax.py` 維度註解（修正計算錯誤）
+- ✅ 實現 Reward 函數（6 個獎勵組件）
+  - r_stand (0.4)：站立獎勵
+  - r_approach (0.3)：靠近球獎勵
+  - r_ball_vel (0.2)：球朝向球門速度
+  - r_kick (0.05)：腳接觸球
+  - r_energy (-0.01)：能量懲罰
+  - r_time (-0.01)：時間懲罰
+
+**待完成**：
+- ⚠️ 在 Databricks 運行 `03_task_index_validation.ipynb` 確認真實維度
+- ⚠️ 攻擊方向邏輯需確認（見 `soccer_env.py` 第 345-347 行 TODO(human)）
+
+**關鍵發現**：
+- 官方 `main.py` 的 `get_task_onehot()` 直接返回 `info['task_index']`
+- imitation learning 使用手動創建的 3 維 one-hot
+- 需要在官方環境驗證 `task_index` 真實維度才能確定最終答案
+
+---
+
 ### 2026-01-07 (Session 3)
 
 **完成項目**：
@@ -77,18 +104,19 @@
 
 > 下一個 Claude session 應執行以下任務
 
-### 優先級 1：調查 obs 維度差異（83 vs 87）
-- 對比官方 `preprocessor.py` 找出缺少的 4 維
-- 修正 `src/mjx/preprocessor_jax.py`
+### 優先級 1：驗證 task_index 維度
+- 在 Databricks 運行 `src/notebooks/03_task_index_validation.ipynb`
+- 確認官方環境 `info['task_index']` 是 3 維還是 7 維
+- 根據結果更新 preprocessor
 
-### 優先級 2：設計 Reward 函數
-- 在 `soccer_env.py` 的 `_compute_reward` 方法中實現
-- 建議從簡單獎勵開始：站立獎勵 + 朝向球獎勵
-- 參考官方 benchmark 的獎勵設計
+### 優先級 2：確認攻擊方向邏輯
+- 查看 `soccer_env.py` 第 345-347 行的 TODO(human)
+- 決定 team 0 應攻擊 goal_0 還是 goal_1
 
 ### 優先級 3：實現 PPO 訓練循環
 - 創建 `src/training/ppo_mjx.py`
 - 使用 JAX 實現 PPO（或使用 brax/mujoco_playground 的實現）
+- 測試 reward 函數的有效性
 
 ---
 
@@ -98,8 +126,9 @@
 |------|------|------|
 | ~~OSMesa 是否正常運作？~~ | ✅ 已解決 | 必須用 `MUJOCO_GL=disabled` |
 | ~~MJX 能否載入 soccer_env.xml？~~ | ✅ 已解決 | 需改 cylinder → capsule |
-| obs 維度 83 vs 87 | ⚠️ 待調查 | 缺少 4 維，需對比官方 preprocessor |
-| Reward 函數設計 | 待設計 | 需要人工參與設計 |
+| obs 維度 83 vs 87 | ⚠️ 待驗證 | 已創建驗證 notebook，需在 Databricks 運行 |
+| ~~Reward 函數設計~~ | ✅ 已實現 | 6 組件獎勵，見 `soccer_env.py` |
+| 攻擊方向邏輯 | ⚠️ 待確認 | TODO(human) 在 `soccer_env.py:345` |
 
 ---
 
@@ -124,7 +153,8 @@
 
 | 文件 | 說明 |
 |------|------|
-| `src/mjx/soccer_env.py` | MJX 環境類（reset/step） |
+| `src/mjx/soccer_env.py` | MJX 環境類（reset/step/reward） |
 | `src/mjx/preprocessor_jax.py` | JAX 版本 Preprocessor |
 | `src/mjx/assets/soccer_env.xml` | 12 DOF 機器人 + 球 + 球門 |
 | `src/notebooks/01_environment_validation.ipynb` | Databricks 環境驗證 |
+| `src/notebooks/03_task_index_validation.ipynb` | task_index 維度驗證 |
