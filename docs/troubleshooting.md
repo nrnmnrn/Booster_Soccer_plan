@@ -49,6 +49,7 @@
 
 | 問題 | 解決方案 |
 |------|----------|
+| `DeprecationWarning: Conversion of an array with ndim > 0 to a scalar is deprecated` | MuJoCo API 返回 ndim=1 陣列。用 `.item()` 而非 `int()` 取值，如 `mj_model.joint(i).type.item()` |
 | `'NoneType' has no attribute 'eglQueryString'` | Headless 環境。在 import mujoco **之前**設 `MUJOCO_GL=disabled` |
 | `Cannot use OSMesa... PYOPENGL_PLATFORM is 'egl'` | **Databricks 無 OSMesa**。改用 `MUJOCO_GL=disabled`（MJX 訓練不需要渲染） |
 | `'NoneType' has no attribute 'eglGetCurrentContext'` | OpenGL 已被其他套件 import。`restartPython()` 後**第一行**設環境變數 |

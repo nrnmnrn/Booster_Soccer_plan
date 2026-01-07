@@ -13,6 +13,27 @@
 
 ## 上次 Session 摘要
 
+### 2026-01-07 (Session 5)
+
+**完成項目**：
+- ✅ 修復 `02_xml_loading.ipynb` MJX 載入測試
+  - 改用 `soccer_env.xml`（MJX 兼容版本）
+  - 修復 NumPy scalar 提取警告（`int()` → `.item()`）
+  - 添加 ball/goal body/site ID 獲取示範
+- ✅ Databricks 驗證通過：MJX 編譯 + GPU step 成功
+- ✅ 更新 troubleshooting.md（NumPy .item() 用法）
+
+**Notebook 輸出摘要**：
+- Actuators: 12 ✅
+- qpos dim: 26 ✅ (robot 7 + joints 12 + ball 7)
+- MJX 編譯成功
+- First step (JIT): ~45s, 1000 steps: ~51s
+
+**待完成**：
+- ⚠️ 繼續 Session 4 的 task_index 維度驗證
+
+---
+
 ### 2026-01-07 (Session 4)
 
 **完成項目**：
@@ -157,4 +178,5 @@
 | `src/mjx/preprocessor_jax.py` | JAX 版本 Preprocessor |
 | `src/mjx/assets/soccer_env.xml` | 12 DOF 機器人 + 球 + 球門 |
 | `src/notebooks/01_environment_validation.ipynb` | Databricks 環境驗證 |
+| `src/notebooks/02_xml_loading.ipynb` | MJX XML 載入測試（soccer_env.xml） |
 | `src/notebooks/03_task_index_validation.ipynb` | task_index 維度驗證 |
