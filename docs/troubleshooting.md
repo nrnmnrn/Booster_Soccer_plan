@@ -53,6 +53,8 @@
 | `TypeError: SAIClient.__init__() got an unexpected keyword argument 'scene_id'` | sai-rl 版本太舊。需升級到最新版（0.1.36+） |
 | `No module named 'sai_rl'` | 在 `requirements.txt` 添加 `sai-rl`，然後重新安裝 Cluster Library |
 | `AuthenticationError: No API key provided` | 設置 `SAI_API_KEY` 環境變數或傳入 `api_key` 參數 |
+| `sai.make_env("LowerT1KickToTarget-v0")` 失敗 | **官方 Bug（2026-01-08）**。使用 `comp_id` 參數初始化 SAIClient 後的 `make_env()` 無法直接指定環境。需聯繫官方或使用 workaround。 |
+| `/soccer_ball` body name 找不到 | dm_control/PyMJCF attach 時自動加 `/` 前綴。需 patch sai_mujoco 源碼或使用帶前綴名稱。 |
 
 > **⚠️ SAI 套件版本要求（2026-01）**：
 > - 官方環境需要 **NumPy 2.x**（numpy==2.1.3）
@@ -86,7 +88,19 @@
 
 | 問題 | 解決方案 |
 |------|----------|
-| *尚無記錄* | - |
+| Quaternion 順序混淆 | **sai_mujoco 使用 [x,y,z,w]**，而非 MuJoCo 標準 [w,x,y,z]。見 `football.py` 的 `data[[1,2,3,0]]` 轉換 |
+| 三個環境原始 obs 維度不同 | LowerT1KickToTarget-v0: **39維**，LowerT1GoaliePenaltyKick-v0: **45維**，LowerT1ObstaclePenaltyKick-v0: **54維**。Preprocessor 會統一為 87 維 |
+| task_one_hot 維度 | **3 維**（不是 7 維）：GoaliePK=[1,0,0], ObstaclePK=[0,1,0], KickToTarget=[0,0,1] |
+| defender_xpos 維度 | 需驗證：可能是 **9 維**（3 defenders × 3 coords），不是 3 維 |
+
+> **官方 Preprocessor 結構（87 維）**：
+> 來源：`booster_soccer_showdown/imitation_learning/scripts/preprocessor.py`
+> ```
+> robot_qpos(12) + robot_qvel(12) + project_gravity(3) + robot_gyro(3) +
+> accelerometer(3) + velocimeter(3) + goal_info(12) + ball_info(9) +
+> player_team(2) + goalkeeper_info(12) + target_info(6) + defender_xpos(?) +
+> task_one_hot(3) = 87
+> ```
 
 ### 獎勵函數
 

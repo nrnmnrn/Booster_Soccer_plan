@@ -25,8 +25,9 @@ mimic/assets XML → MJX (GPU) → 簡化獎勵預訓練 → jax2torch → 官�
 
 | 約束 | 說明 |
 |------|------|
-| Preprocessor 維度 | **必須是 87 維**（與 DDPG 訓練一致） |
-| Quaternion 順序 | **[w, x, y, z]**（MuJoCo 標準） |
+| Preprocessor 維度 | **87 維**（由官方代碼決定，不硬編碼） |
+| Quaternion 順序 | **[x, y, z, w]**（sai_mujoco 標準，注意與 MuJoCo [w,x,y,z] 不同！） |
+| task_one_hot | **3 維**（GoaliePK=[1,0,0], ObstaclePK=[0,1,0], KickToTarget=[0,0,1]） |
 | SAC→DDPG 轉換 | **只取 mean**（前 12 維），捨棄 log_std |
 | Body ID 獲取 | **使用 `mj_name2id`**，禁止硬編碼 |
 | 禁止修改 | `.env`, `credentials`, 機密文件 |

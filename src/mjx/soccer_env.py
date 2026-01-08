@@ -32,10 +32,18 @@ from .preprocessor_jax import (
 
 
 class EnvState(NamedTuple):
-    """環境狀態（用於 JAX functional style）"""
+    """環境狀態（用於 JAX functional style）
+
+    Attributes:
+        mjx_data: MJX 物理引擎狀態
+        step_count: 每個環境的當前步數，shape (num_envs,)
+        key: JAX random key
+        task_one_hot: 任務 one-hot 編碼，shape (num_envs, 3)
+    """
     mjx_data: mjx.Data
     step_count: jnp.ndarray
     key: jnp.ndarray
+    task_one_hot: jnp.ndarray  # 添加 task_one_hot 以支持隨機化
 
 
 class MJXSoccerEnv:
@@ -55,6 +63,8 @@ class MJXSoccerEnv:
         max_steps: int = 1000,
         player_team: int = 0,
         task_index: int = 0,
+        random_task_index: bool = False,
+        auto_reset: bool = True,
     ):
         """初始化環境
 
@@ -63,7 +73,9 @@ class MJXSoccerEnv:
             num_envs: 並行環境數量
             max_steps: 每 episode 最大步數
             player_team: 球員隊伍 (0 或 1)
-            task_index: 任務索引 (0, 1, 2)
+            task_index: 任務索引 (0, 1, 2)，當 random_task_index=False 時使用
+            random_task_index: 是否在每次 reset 時隨機選擇任務
+            auto_reset: 是否在 done 時自動重置環境
         """
         if xml_path is None:
             xml_path = str(ASSETS_DIR / "soccer_env.xml")
@@ -77,6 +89,9 @@ class MJXSoccerEnv:
 
         self.num_envs = num_envs
         self.max_steps = max_steps
+        self.random_task_index = random_task_index
+        self.auto_reset = auto_reset
+        self._fixed_task_index = task_index
 
         # 使用 mj_name2id 獲取 body ID（禁止硬編碼！）
         self._init_body_ids()
@@ -86,6 +101,7 @@ class MJXSoccerEnv:
             [1, 0] if player_team == 0 else [0, 1],
             dtype=jnp.float32
         )
+        # task_one_hot 將在 reset 中設置（支持隨機化）
         self.task_one_hot = jnp.zeros(3, dtype=jnp.float32).at[task_index].set(1.0)
 
         # Action 和 Observation 維度
@@ -145,7 +161,7 @@ class MJXSoccerEnv:
         Returns:
             (state, observation)
         """
-        key, subkey = jax.random.split(key)
+        key, subkey, task_key = jax.random.split(key, 3)
 
         # 創建初始 mjx_data
         mjx_data = mjx.put_data(self.mj_model, self.mj_data)
@@ -160,14 +176,26 @@ class MJXSoccerEnv:
         # 隨機化初始狀態
         mjx_data = self._randomize_state(mjx_data, subkey)
 
+        # 生成 task_one_hot（支持隨機化）
+        if self.random_task_index:
+            # 每個環境隨機選擇任務
+            task_indices = jax.random.randint(task_key, (self.num_envs,), 0, 3)
+            task_one_hot = jax.nn.one_hot(task_indices, 3)
+        else:
+            # 使用固定任務
+            task_one_hot = jnp.tile(
+                self.task_one_hot[None, :], (self.num_envs, 1)
+            )
+
         state = EnvState(
             mjx_data=mjx_data,
             step_count=jnp.zeros(self.num_envs, dtype=jnp.int32),
             key=key,
+            task_one_hot=task_one_hot,
         )
 
-        # 計算初始 observation
-        obs = self._get_obs(mjx_data)
+        # 計算初始 observation（使用 state 中的 task_one_hot）
+        obs = self._get_obs_with_task(mjx_data, task_one_hot)
 
         return state, obs
 
@@ -193,20 +221,36 @@ class MJXSoccerEnv:
         # MJX step
         mjx_data = self._mjx_step(mjx_data)
 
-        # 計算 observation
-        obs = self._get_obs(mjx_data)
-
-        # 計算 reward
+        # 計算 reward（在 reset 之前）
         reward = self._compute_reward(mjx_data, action)
 
-        # 檢查終止條件
-        done = self._check_termination(mjx_data, state.step_count)
+        # 檢查終止條件（使用 step_count + 1 避免 off-by-one 錯誤）
+        # 這樣確保 episode 精確運行 max_steps 步
+        done = self._check_termination(mjx_data, state.step_count + 1)
+
+        # AutoReset：對已終止的環境執行重置
+        if self.auto_reset:
+            mjx_data, task_one_hot, step_count, key = self._auto_reset(
+                mjx_data,
+                state.task_one_hot,
+                state.step_count,
+                state.key,
+                done,
+            )
+        else:
+            task_one_hot = state.task_one_hot
+            step_count = state.step_count + 1
+            key = state.key
+
+        # 計算 observation（使用可能已更新的 task_one_hot）
+        obs = self._get_obs_with_task(mjx_data, task_one_hot)
 
         # 更新狀態
         new_state = EnvState(
             mjx_data=mjx_data,
-            step_count=state.step_count + 1,
-            key=state.key,
+            step_count=step_count,
+            key=key,
+            task_one_hot=task_one_hot,
         )
 
         info = {
@@ -214,6 +258,69 @@ class MJXSoccerEnv:
         }
 
         return new_state, obs, reward, done, info
+
+    def _auto_reset(
+        self,
+        mjx_data: mjx.Data,
+        task_one_hot: jnp.ndarray,
+        step_count: jnp.ndarray,
+        key: jnp.ndarray,
+        done: jnp.ndarray,
+    ) -> Tuple[mjx.Data, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        """對已終止的環境執行自動重置
+
+        Args:
+            mjx_data: 當前 MJX 數據
+            task_one_hot: 當前任務 one-hot
+            step_count: 當前步數
+            key: JAX random key
+            done: 終止標誌
+
+        Returns:
+            (new_mjx_data, new_task_one_hot, new_step_count, new_key)
+        """
+        key, reset_key, task_key = jax.random.split(key, 3)
+
+        # 創建初始 mjx_data（用於重置）
+        init_mjx_data = mjx.put_data(self.mj_model, self.mj_data)
+
+        # 批量化初始數據
+        if self.num_envs > 1:
+            init_mjx_data = jax.tree.map(
+                lambda x: jnp.stack([x] * self.num_envs),
+                init_mjx_data
+            )
+
+        # 隨機化初始狀態（與 reset() 保持一致）
+        init_mjx_data = self._randomize_state(init_mjx_data, reset_key)
+
+        # 使用 where 選擇：done 的環境用初始數據，否則用當前數據
+        new_mjx_data = jax.tree.map(
+            lambda init, curr: jnp.where(
+                done[:, None] if init.ndim > 1 else done,
+                init,
+                curr
+            ),
+            init_mjx_data,
+            mjx_data,
+        )
+
+        # 更新 task_one_hot（如果啟用隨機化）
+        if self.random_task_index:
+            new_task_indices = jax.random.randint(task_key, (self.num_envs,), 0, 3)
+            new_task_one_hot_rand = jax.nn.one_hot(new_task_indices, 3)
+            new_task_one_hot = jnp.where(
+                done[:, None],
+                new_task_one_hot_rand,
+                task_one_hot,
+            )
+        else:
+            new_task_one_hot = task_one_hot
+
+        # 重置步數
+        new_step_count = jnp.where(done, 0, step_count + 1)
+
+        return new_mjx_data, new_task_one_hot, new_step_count, key
 
     @partial(jax.jit, static_argnums=(0,))
     def _mjx_step(self, mjx_data: mjx.Data) -> mjx.Data:
@@ -230,13 +337,36 @@ class MJXSoccerEnv:
     # =========================================================================
 
     def _get_obs(self, mjx_data: mjx.Data) -> jnp.ndarray:
-        """從 mjx_data 提取 87 維 observation"""
+        """從 mjx_data 提取 87 維 observation（使用實例的 task_one_hot）
+
+        注意：此方法使用 self.task_one_hot，不支持隨機 task_index。
+        對於訓練，請使用 _get_obs_with_task。
+        """
+        task_one_hot = jnp.tile(
+            self.task_one_hot[None, :], (self.num_envs, 1)
+        )
+        return self._get_obs_with_task(mjx_data, task_one_hot)
+
+    def _get_obs_with_task(
+        self,
+        mjx_data: mjx.Data,
+        task_one_hot: jnp.ndarray
+    ) -> jnp.ndarray:
+        """從 mjx_data 提取 87 維 observation（指定 task_one_hot）
+
+        Args:
+            mjx_data: MJX 數據
+            task_one_hot: 任務 one-hot，shape (num_envs, 3)
+
+        Returns:
+            observation，shape (num_envs, 87)
+        """
         # 提取機器人關節狀態
         robot_qpos = mjx_data.qpos[..., self.robot_qpos_start:self.robot_qpos_end]
         robot_qvel = mjx_data.qvel[..., 6:18]  # 跳過 root 的 6 DOF
 
-        # 提取環境資訊
-        info = self._extract_env_info(mjx_data)
+        # 提取環境資訊（傳入 task_one_hot）
+        info = self._extract_env_info(mjx_data, task_one_hot)
 
         # 調用 preprocessor
         if self.num_envs > 1:
@@ -247,8 +377,21 @@ class MJXSoccerEnv:
 
         return obs
 
-    def _extract_env_info(self, mjx_data: mjx.Data) -> EnvInfo:
-        """從 mjx_data 提取 EnvInfo 結構"""
+    def _extract_env_info(
+        self,
+        mjx_data: mjx.Data,
+        task_one_hot: jnp.ndarray = None
+    ) -> EnvInfo:
+        """從 mjx_data 提取 EnvInfo 結構
+
+        Args:
+            mjx_data: MJX 數據
+            task_one_hot: 任務 one-hot，shape (num_envs, 3)。
+                          如果為 None，使用 self.task_one_hot。
+
+        Returns:
+            EnvInfo 結構
+        """
         # 機器人軀幹狀態
         robot_xpos = mjx_data.xpos[..., self.trunk_body_id, :]
 
@@ -274,18 +417,24 @@ class MJXSoccerEnv:
         # 門將/目標/防守者（MJX 預訓練階段可用零值）
         zeros_3 = jnp.zeros_like(robot_xpos)
 
-        # 廣播 player_team 和 task_one_hot 到 batch 維度
-        # 原始 shape: (2,) 和 (3,)，需要變成 (num_envs, 2) 和 (num_envs, 3)
+        # 廣播 player_team 到 batch 維度
         if self.num_envs > 1:
             player_team_batched = jnp.tile(
                 self.player_team[None, :], (self.num_envs, 1)
             )
-            task_one_hot_batched = jnp.tile(
-                self.task_one_hot[None, :], (self.num_envs, 1)
-            )
         else:
             player_team_batched = self.player_team
-            task_one_hot_batched = self.task_one_hot
+
+        # 使用傳入的 task_one_hot 或默認值
+        if task_one_hot is None:
+            if self.num_envs > 1:
+                task_one_hot_batched = jnp.tile(
+                    self.task_one_hot[None, :], (self.num_envs, 1)
+                )
+            else:
+                task_one_hot_batched = self.task_one_hot
+        else:
+            task_one_hot_batched = task_one_hot
 
         return EnvInfo(
             robot_quat=robot_quat,
@@ -433,13 +582,17 @@ def create_soccer_env(
     num_envs: int = 1024,
     player_team: int = 0,
     task_index: int = 0,
+    random_task_index: bool = False,
+    auto_reset: bool = True,
 ) -> MJXSoccerEnv:
     """創建 MJX 足球環境
 
     Args:
         num_envs: 並行環境數量
         player_team: 球員隊伍 (0 或 1)
-        task_index: 任務索引 (0=GoaliePenaltyKick, 1=DrillPassing, 2=DrillShooting)
+        task_index: 任務索引 (0=GoaliePenaltyKick, 1=ObstaclePK, 2=KickToTarget)
+        random_task_index: 是否隨機化任務索引
+        auto_reset: 是否自動重置終止的環境
 
     Returns:
         MJXSoccerEnv instance
@@ -448,6 +601,8 @@ def create_soccer_env(
         num_envs=num_envs,
         player_team=player_team,
         task_index=task_index,
+        random_task_index=random_task_index,
+        auto_reset=auto_reset,
     )
 
 
@@ -457,23 +612,62 @@ if __name__ == "__main__":
     os.environ["MUJOCO_GL"] = "disabled"
 
     print("Testing MJXSoccerEnv...")
+    print("=" * 50)
 
+    # 測試 1: 基本功能
+    print("\n[1/3] Testing basic functionality...")
     env = MJXSoccerEnv(num_envs=4)
-    print(f"Action dim: {env.action_dim}")
-    print(f"Obs dim: {env.obs_dim}")
+    print(f"  Action dim: {env.action_dim}")
+    print(f"  Obs dim: {env.obs_dim}")
 
     key = jax.random.PRNGKey(0)
     state, obs = env.reset(key)
 
-    print(f"Initial obs shape: {obs.shape}")
+    print(f"  Initial obs shape: {obs.shape}")
     assert obs.shape == (4, 87), f"Expected (4, 87), got {obs.shape}"
+    assert state.task_one_hot.shape == (4, 3), f"Expected task_one_hot (4, 3), got {state.task_one_hot.shape}"
+    print(f"  Task one-hot shape: {state.task_one_hot.shape}")
 
     # Test step
     action = jnp.zeros((4, 12))
     state, obs, reward, done, info = env.step(state, action)
 
-    print(f"After step obs shape: {obs.shape}")
-    print(f"Reward shape: {reward.shape}")
-    print(f"Done shape: {done.shape}")
+    print(f"  After step obs shape: {obs.shape}")
+    print(f"  Reward shape: {reward.shape}")
+    print(f"  Done shape: {done.shape}")
+    print("  ✓ Basic functionality passed!")
 
-    print("✅ MJXSoccerEnv test passed!")
+    # 測試 2: 隨機 task_index
+    print("\n[2/3] Testing random task index...")
+    env_rand = MJXSoccerEnv(num_envs=100, random_task_index=True)
+    key = jax.random.PRNGKey(42)
+    state, obs = env_rand.reset(key)
+
+    # 檢查 task_one_hot 分佈
+    task_sums = jnp.sum(state.task_one_hot, axis=0)
+    print(f"  Task distribution: {task_sums}")
+    assert jnp.all(task_sums > 0), "Each task should appear at least once with 100 envs"
+    print("  ✓ Random task index passed!")
+
+    # 測試 3: AutoReset
+    print("\n[3/3] Testing auto reset...")
+    env_auto = MJXSoccerEnv(num_envs=4, auto_reset=True, max_steps=5)
+    key = jax.random.PRNGKey(123)
+    state, obs = env_auto.reset(key)
+
+    # 運行幾步直到超時
+    for i in range(10):
+        action = jax.random.uniform(key, (4, 12), minval=-1, maxval=1)
+        state, obs, reward, done, info = env_auto.step(state, action)
+        key = jax.random.split(key)[0]
+
+        if jnp.any(done):
+            print(f"  Step {i}: done={done}, step_count={state.step_count}")
+
+    # 檢查 step_count 是否被重置（不應該超過 max_steps）
+    assert jnp.all(state.step_count <= env_auto.max_steps), \
+        f"Step count should be reset, but got {state.step_count}"
+    print("  ✓ Auto reset passed!")
+
+    print("\n" + "=" * 50)
+    print("✅ All MJXSoccerEnv tests passed!")

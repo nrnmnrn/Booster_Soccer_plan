@@ -6,12 +6,51 @@
 
 ## 當前狀態
 
-**階段**：Week 1 Day 2 - MJX 環境開發
-**日期**：2026-01-07
+**階段**：Week 1 Day 3 - 官方格式驗證完成
+**日期**：2026-01-08
 
 ---
 
 ## 上次 Session 摘要
+
+### 2026-01-08 (Session 6)
+
+**完成項目**：
+- ✅ **重大發現：Quaternion 順序**
+  - sai_mujoco 使用 **[x, y, z, w]** 格式
+  - 不是 MuJoCo 標準的 [w, x, y, z]
+  - 見 `football.py` 的 `data[[1, 2, 3, 0]]` 轉換
+- ✅ **確認 task_one_hot 維度**
+  - **3 維**（不是之前假設的 7 維）
+  - GoaliePenaltyKick: [1, 0, 0]
+  - ObstaclePenaltyKick: [0, 1, 0]
+  - KickToTarget: [0, 0, 1]
+- ✅ **確認三個環境原始 obs 維度**
+  - LowerT1KickToTarget-v0: **39 維**
+  - LowerT1GoaliePenaltyKick-v0: **45 維**
+  - LowerT1ObstaclePenaltyKick-v0: **54 維**
+  - Preprocessor 統一為 87 維
+- ✅ **發現官方 Bug**
+  - `sai.make_env("LowerT1KickToTarget-v0")` 無法使用
+  - `/soccer_ball` body name 找不到（dm_control/PyMJCF 前綴問題）
+- ✅ **確認官方 Imitation Learning Pipeline**
+  - collect_data.py → train.py → jax2torch.py → model.py → submit_sai.py
+  - 完整流程可用，但需要 teleoperation 收集數據
+- ✅ **更新文檔**
+  - 修正 CLAUDE.md Quaternion 順序約束
+  - 添加 troubleshooting.md SAI bug 記錄
+  - 添加 Preprocessor 結構說明
+
+**關鍵發現**：
+- 官方 `training_scripts/main.py` 使用 `n_features=87`
+- 提交模型 (`model.py`) 只用 obs 前 30 維做步態控制
+- 專案已有完整 MJX 實現：`src/mjx/soccer_env.py` + `preprocessor_jax.py`
+
+**決策**：
+- 選擇 **MJX RL 方案**（不使用官方 IL 方案）
+- 需要確保 MJX preprocessor 與官方 87 維格式兼容
+
+---
 
 ### 2026-01-07 (Session 5)
 
@@ -125,19 +164,49 @@
 
 > 下一個 Claude session 應執行以下任務
 
-### 優先級 1：驗證 task_index 維度
-- 在 Databricks 運行 `src/notebooks/03_task_index_validation.ipynb`
-- 確認官方環境 `info['task_index']` 是 3 維還是 7 維
-- 根據結果更新 preprocessor
+### 優先級 1：驗證 info dict 字段維度（在 Databricks 上）
+- 運行官方環境，打印 info dict 各字段的 shape
+- 特別確認 `defender_xpos` 是 3 維還是 9 維
+- 確認缺失字段的處理（如 KickToTarget 沒有 goalkeeper）
 
-### 優先級 2：確認攻擊方向邏輯
-- 查看 `soccer_env.py` 第 345-347 行的 TODO(human)
-- 決定 team 0 應攻擊 goal_0 還是 goal_1
+**驗證腳本**：
+```python
+from sai_rl import SAIClient
 
-### 優先級 3：實現 PPO 訓練循環
-- 創建 `src/training/ppo_mjx.py`
-- 使用 JAX 實現 PPO（或使用 brax/mujoco_playground 的實現）
+sai = SAIClient(comp_id="lower-t1-penalty-kick-goalie", api_key="YOUR_KEY")
+env = sai.make_env()
+obs, info = env.reset()
+
+for key, value in info.items():
+    if hasattr(value, 'shape'):
+        print(f"{key}: shape={value.shape}")
+    else:
+        print(f"{key}: {value}")
+```
+
+### 優先級 2：修正現有 MJX preprocessor
+根據驗證結果修正：
+- `src/mjx/preprocessor_jax.py` 的維度假設
+- `src/mjx/soccer_env.py` 的 EnvInfo 結構
+
+### 優先級 3：開始 RL 訓練
+- 創建 `src/training/ppo_mjx.py` 或使用 brax 的 PPO
 - 測試 reward 函數的有效性
+- 開始 MJX 預訓練（10M 步目標）
+
+### 優先級 4：JAX → PyTorch 轉換
+- 參考 `booster_soccer_showdown/imitation_learning/scripts/jax2torch.py`
+- 確保轉換後模型與 `submission/model.py` 兼容
+
+---
+
+## 已解決問題（Session 6 更新）
+
+| 問題 | 狀態 | 備註 |
+|------|------|------|
+| ~~task_one_hot 維度~~ | ✅ 已解決 | **3 維**，不是 7 維 |
+| ~~Quaternion 順序~~ | ✅ 已解決 | sai_mujoco 用 **[x,y,z,w]** |
+| ~~官方 Preprocessor 結構~~ | ✅ 已解決 | 87 維，見 troubleshooting.md |
 
 ---
 
@@ -147,9 +216,13 @@
 |------|------|------|
 | ~~OSMesa 是否正常運作？~~ | ✅ 已解決 | 必須用 `MUJOCO_GL=disabled` |
 | ~~MJX 能否載入 soccer_env.xml？~~ | ✅ 已解決 | 需改 cylinder → capsule |
-| obs 維度 83 vs 87 | ⚠️ 待驗證 | 已創建驗證 notebook，需在 Databricks 運行 |
+| ~~obs 維度 83 vs 87~~ | ✅ 已解決 | 87 維（task_one_hot 是 3 維不是 7 維） |
 | ~~Reward 函數設計~~ | ✅ 已實現 | 6 組件獎勵，見 `soccer_env.py` |
+| ~~task_one_hot 維度~~ | ✅ 已解決 | 3 維 |
+| ~~Quaternion 順序~~ | ✅ 已解決 | [x,y,z,w]（sai_mujoco 格式） |
+| defender_xpos 維度 | ⚠️ 待驗證 | 可能是 9 維（3×3），不是 3 維 |
 | 攻擊方向邏輯 | ⚠️ 待確認 | TODO(human) 在 `soccer_env.py:345` |
+| sai.make_env bug | ⚠️ 官方問題 | 無法直接指定環境，需等官方修復 |
 
 ---
 
