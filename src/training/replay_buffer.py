@@ -10,6 +10,7 @@ Features:
 - 狀態完全由 JAX arrays 表示
 """
 
+from functools import partial
 from typing import Dict, NamedTuple
 import jax
 import jax.numpy as jnp
@@ -194,7 +195,7 @@ class ReplayBuffer:
         )
 
     @staticmethod
-    @jax.jit
+    @partial(jax.jit, static_argnames=('batch_size',))
     def sample(
         state: BufferState,
         batch_size: int,
@@ -204,7 +205,7 @@ class ReplayBuffer:
 
         Args:
             state: 當前 buffer 狀態
-            batch_size: 採樣數量
+            batch_size: 採樣數量（靜態參數，用於確定 array shape）
             rng: JAX random key
 
         Returns:

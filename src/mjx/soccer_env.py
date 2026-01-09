@@ -38,7 +38,7 @@ class EnvState(NamedTuple):
         mjx_data: MJX 物理引擎狀態
         step_count: 每個環境的當前步數，shape (num_envs,)
         key: JAX random key
-        task_one_hot: 任務 one-hot 編碼，shape (num_envs, 3)
+        task_one_hot: 任務編碼，shape (num_envs, 7)，擴展至 7 維以達到 87 維輸出
     """
     mjx_data: mjx.Data
     step_count: jnp.ndarray
@@ -102,7 +102,9 @@ class MJXSoccerEnv:
             dtype=jnp.float32
         )
         # task_one_hot 將在 reset 中設置（支持隨機化）
-        self.task_one_hot = jnp.zeros(3, dtype=jnp.float32).at[task_index].set(1.0)
+        # 7 維編碼：前 3 維為任務 one-hot，後 4 維為預留空間（填 0）
+        # 這使得總輸出維度達到 87 維（80 + 7 = 87）
+        self.task_one_hot = jnp.zeros(7, dtype=jnp.float32).at[task_index].set(1.0)
 
         # Action 和 Observation 維度
         self.action_dim = self.mj_model.nu  # 12
@@ -177,10 +179,12 @@ class MJXSoccerEnv:
         mjx_data = self._randomize_state(mjx_data, subkey)
 
         # 生成 task_one_hot（支持隨機化）
+        # 使用 7 維編碼：前 3 維為任務 one-hot，後 4 維填 0
         if self.random_task_index:
-            # 每個環境隨機選擇任務
+            # 每個環境隨機選擇任務（0, 1, 2 三種任務）
             task_indices = jax.random.randint(task_key, (self.num_envs,), 0, 3)
-            task_one_hot = jax.nn.one_hot(task_indices, 3)
+            # one_hot 產生 7 維，索引 0-2 對應任務，索引 3-6 永遠為 0
+            task_one_hot = jax.nn.one_hot(task_indices, 7)
         else:
             # 使用固定任務
             task_one_hot = jnp.tile(
@@ -295,9 +299,10 @@ class MJXSoccerEnv:
         init_mjx_data = self._randomize_state(init_mjx_data, reset_key)
 
         # 使用 where 選擇：done 的環境用初始數據，否則用當前數據
+        # 注意：MJX Data 包含不同維度的陣列（2D、3D），需動態調整 done 的形狀
         new_mjx_data = jax.tree.map(
             lambda init, curr: jnp.where(
-                done[:, None] if init.ndim > 1 else done,
+                jnp.reshape(done, (self.num_envs,) + (1,) * (init.ndim - 1)),
                 init,
                 curr
             ),
@@ -308,7 +313,8 @@ class MJXSoccerEnv:
         # 更新 task_one_hot（如果啟用隨機化）
         if self.random_task_index:
             new_task_indices = jax.random.randint(task_key, (self.num_envs,), 0, 3)
-            new_task_one_hot_rand = jax.nn.one_hot(new_task_indices, 3)
+            # 使用 7 維 one_hot 以達到 87 維輸出
+            new_task_one_hot_rand = jax.nn.one_hot(new_task_indices, 7)
             new_task_one_hot = jnp.where(
                 done[:, None],
                 new_task_one_hot_rand,
@@ -356,7 +362,7 @@ class MJXSoccerEnv:
 
         Args:
             mjx_data: MJX 數據
-            task_one_hot: 任務 one-hot，shape (num_envs, 3)
+            task_one_hot: 任務編碼，shape (num_envs, 7)
 
         Returns:
             observation，shape (num_envs, 87)
@@ -375,6 +381,9 @@ class MJXSoccerEnv:
         else:
             obs = preprocess_observation(robot_qpos, robot_qvel, info)
 
+        # 裁剪觀察值以防止數值不穩定（避免 NaN in SAC）
+        obs = jnp.clip(obs, -10.0, 10.0)
+
         return obs
 
     def _extract_env_info(
@@ -386,7 +395,7 @@ class MJXSoccerEnv:
 
         Args:
             mjx_data: MJX 數據
-            task_one_hot: 任務 one-hot，shape (num_envs, 3)。
+            task_one_hot: 任務編碼，shape (num_envs, 7)。
                           如果為 None，使用 self.task_one_hot。
 
         Returns:
@@ -625,7 +634,7 @@ if __name__ == "__main__":
 
     print(f"  Initial obs shape: {obs.shape}")
     assert obs.shape == (4, 87), f"Expected (4, 87), got {obs.shape}"
-    assert state.task_one_hot.shape == (4, 3), f"Expected task_one_hot (4, 3), got {state.task_one_hot.shape}"
+    assert state.task_one_hot.shape == (4, 7), f"Expected task_one_hot (4, 7), got {state.task_one_hot.shape}"
     print(f"  Task one-hot shape: {state.task_one_hot.shape}")
 
     # Test step

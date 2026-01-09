@@ -16,7 +16,8 @@
 
 | 問題 | 解決方案 |
 |------|----------|
-| *尚無記錄* | - |
+| JIT 編譯時 GPU OOM + Disk 暴增 | `num_envs=2048` 太大。降至 512，JIT 通過後可嘗試 1024。見 `config.py:57` |
+| `DEBUG:ThreadMonitor` 無限重複 | JIT 編譯中，非錯誤。L4 GPU 首次編譯 MJX 需 5-15 分鐘 |
 
 ### Databricks
 
@@ -38,6 +39,8 @@
 | `jax[cuda12]==0.4.38` 安裝後版本不對 | extras 語法不固定 jaxlib 版本，必須明確指定三個套件版本 |
 | `vmap got inconsistent sizes for array axes` | 常數陣列（如 `player_team`）未廣播到 batch 維度。用 `jnp.tile(arr[None,:], (num_envs,1))` |
 | `IndexError: f argument "3" with type "q"` | `mjx.step()` 不支援批量輸入。需用 `jax.vmap(mjx.step, in_axes=(None, 0))` 包裝 |
+| `Shapes must be 1D sequences of concrete values` + `JitTracer` | JIT 函數中使用動態值確定 array shape。用 `@partial(jax.jit, static_argnames=('param_name',))` 將參數標記為靜態 |
+| `TracerBoolConversionError` + `if param:` | JIT 函數中使用動態 bool 做條件判斷。用 `static_argnames=('param',)` 標記為靜態，或改用 `jax.lax.cond` |
 
 ### PyTorch
 
@@ -90,7 +93,8 @@
 |------|----------|
 | Quaternion 順序混淆 | **sai_mujoco 使用 [x,y,z,w]**，而非 MuJoCo 標準 [w,x,y,z]。見 `football.py` 的 `data[[1,2,3,0]]` 轉換 |
 | 三個環境原始 obs 維度不同 | LowerT1KickToTarget-v0: **39維**，LowerT1GoaliePenaltyKick-v0: **45維**，LowerT1ObstaclePenaltyKick-v0: **54維**。Preprocessor 會統一為 87 維 |
-| task_one_hot 維度 | **3 維**（不是 7 維）：GoaliePK=[1,0,0], ObstaclePK=[0,1,0], KickToTarget=[0,0,1] |
+| task_one_hot 維度（MJX 預訓練） | **7 維**。前 3 維為任務 one-hot（GoaliePK=[1,0,0,0,0,0,0]），後 4 維填 0。這使 80 + 7 = 87 維符合官方期望。見 ADR-0001 |
+| `Incompatible shapes (2048, 83) vs (2048, 87)` | MJX 環境 task_one_hot 維度不足。擴展至 7 維即可解決。見 ADR-0001 |
 | defender_xpos 維度 | 需驗證：可能是 **9 維**（3 defenders × 3 coords），不是 3 維 |
 
 > **官方 Preprocessor 結構（87 維）**：
@@ -107,6 +111,26 @@
 | 問題 | 解決方案 |
 |------|----------|
 | *尚無記錄* | - |
+
+### SAC 訓練
+
+| 問題 | 解決方案 |
+|------|----------|
+| `Q: nan` 和 `α: nan` 在訓練輸出 | **Tanh 邊界問題**：action = ±1 時 `log(1-tanh²) = log(0) = NaN`。使用 `SafeTanh` bijector 修復 |
+| `RuntimeWarning: overflow encountered in cast` | MJX 物理模擬產生極大值。通常是正常現象，不影響訓練 |
+| obs 範圍過大（如 max=75） | 在 `soccer_env.py` 添加 `jnp.clip(obs, -10, 10)` |
+| `NotImplementedError: mode is not implemented for this transformed distribution` | **distrax Tanh bijector 限制**：自定義 `SafeTanh` 無法使用 `.mode()`。改用 `jnp.tanh(dist.distribution.mean())` 手動計算。見 `sac_agent.py:168, 359` |
+| 訓練崩潰但無 checkpoint（如 140k 步後） | **save_frequency 太大**：預設 500k 步太稀疏。建議設為 50k 步。見 `config.py:89` |
+
+> **⚠️ SafeTanh 修復詳情**：
+>
+> **根本原因**：distrax 的 `Tanh()` 計算 `log(1 - tanh²(x))`。當 `tanh(x) = ±1` 時，`log(0) = -inf → NaN`。
+>
+> **修復**：`sac_agent.py` 定義 `SafeTanh` 類，添加 epsilon：
+> ```python
+> def forward_log_det_jacobian(self, x):
+>     return jnp.log(1.0 - jnp.tanh(x)**2 + 1e-6)  # 添加 1e-6
+> ```
 
 ### 模型轉換 (JAX → PyTorch)
 

@@ -25,12 +25,14 @@
     - target_xpos_rel_robot: 3
     - target_velp_rel_robot: 3
     - defender_xpos: 3
-    - task_one_hot: 3 (或 7，待驗證 info['task_index'] 維度)
-    總計: 80 + 3 = 83 (若 task_index=7 則為 80 + 7 = 87)
+    - task_one_hot: 7 (擴展至 7 維以達到官方 87 維)
+    總計: 80 + 7 = 87 ✓
 
-    ⚠️ 注意：官方 main.py 使用 n_features=87，但實際計算為 83 維。
-    需要在 Databricks 上驗證 info['task_index'] 的真實維度。
-    見 src/notebooks/03_task_index_validation.ipynb
+    技術決策（ADR-004）：
+    - 官方 main.py 使用 n_features=87
+    - 固定部分 80 維 + task_one_hot 7 維 = 87 維
+    - 前 3 維保持原語義（GoaliePK, ObstaclePK, KickToTarget）
+    - 後 4 維為預留空間（填 0）
 """
 
 import jax
@@ -58,7 +60,7 @@ class EnvInfo(NamedTuple):
     target_vel: jnp.ndarray          # (3,) 目標速度
     defender_xpos: jnp.ndarray       # (3,) 防守者位置
     player_team: jnp.ndarray         # (2,) 球員隊伍 one-hot
-    task_one_hot: jnp.ndarray        # (3,) 任務 one-hot
+    task_one_hot: jnp.ndarray        # (7,) 任務編碼（擴展至 7 維以達到 87 維總輸出）
 
 
 # =============================================================================
@@ -242,7 +244,7 @@ def preprocess_observation(
         target_xpos_rel,                # 3
         target_vel_rel,                 # 3
         info.defender_xpos,             # 3  TODO: 應該也要轉換到機器人座標系？
-        info.task_one_hot,              # 3
+        info.task_one_hot,              # 7 (擴展以達到 87 維總輸出)
     ])
 
     return obs  # shape: (87,)
@@ -295,8 +297,9 @@ def create_dummy_env_info(batch_size: Optional[int] = None) -> EnvInfo:
         defender_xpos=jnp.zeros((*shape, 3)),
         player_team=jnp.array([1, 0] if batch_size is None
                               else [[1, 0]] * batch_size, dtype=jnp.float32),
-        task_one_hot=jnp.array([1, 0, 0] if batch_size is None
-                               else [[1, 0, 0]] * batch_size, dtype=jnp.float32),
+        # 7 維 task_one_hot：前 3 維為任務 one-hot，後 4 維填 0
+        task_one_hot=jnp.array([1, 0, 0, 0, 0, 0, 0] if batch_size is None
+                               else [[1, 0, 0, 0, 0, 0, 0]] * batch_size, dtype=jnp.float32),
     )
 
 

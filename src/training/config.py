@@ -14,7 +14,7 @@ class SACConfig:
 
     Attributes:
         # 環境參數
-        num_envs: 並行環境數量（推薦 1024-2048 for L4 GPU）
+        num_envs: 並行環境數量（預設 512，JIT 編譯通過後可嘗試 1024）
         max_episode_steps: 每個 episode 最大步數
         obs_dim: 觀察維度（87，CLAUDE.md 約束）
         action_dim: 動作維度（12，下肢關節）
@@ -54,7 +54,7 @@ class SACConfig:
     """
 
     # === 環境參數 ===
-    num_envs: int = 2048
+    num_envs: int = 32  # 降低以避免 L4 GPU JIT 編譯時 OOM
     max_episode_steps: int = 1000
     obs_dim: int = 87  # CLAUDE.md 約束：固定 87 維
     action_dim: int = 12  # 12 個下肢關節
@@ -77,16 +77,16 @@ class SACConfig:
     # === 訓練流程 ===
     total_timesteps: int = 10_000_000
     learning_starts: int = 10_000  # 前 10k 步隨機探索
-    batch_size: int = 256
+    batch_size: int = 512  # 增大 batch 減少梯度噪聲
     buffer_size: int = 1_000_000
-    updates_per_step: int = 1  # 每收集一步更新幾次
+    updates_per_step: int = 4  # 提高樣本效率（原本 1）
 
     # === Domain Randomization ===
     dr_level: int = 1  # 1=基礎(±5%), 2=進階(±10%), 3=激進(±20%)
     random_task_index: bool = True  # 每次 reset 隨機選擇任務
 
     # === Checkpoint & Logging ===
-    save_frequency: int = 500_000  # 每 500k 步保存
+    save_frequency: int = 50_000  # 每 50k 步保存（更頻繁，避免訓練損失）
     log_frequency: int = 1_000     # 每 1k 步記錄
     eval_frequency: int = 50_000   # 每 50k 步評估
     eval_episodes: int = 10        # 評估時運行的 episode 數
@@ -94,9 +94,9 @@ class SACConfig:
 
     # === 監控 ===
     use_wandb: bool = True
-    use_mlflow: bool = True
+    use_mlflow: bool = False  # Databricks MLflow 需要絕對路徑，暫時禁用（WandB 已足夠）
     wandb_project: str = "booster_soccer_mjx"
-    mlflow_experiment: str = "mjx_sac_training"
+    mlflow_experiment: str = "/Users/adamlin@cheerstech.com.tw/mjx_sac_training"  # Databricks 需要絕對路徑
 
     # === 隨機種子 ===
     seed: int = 42

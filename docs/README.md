@@ -217,24 +217,25 @@ databricks/                         # [NEW] Databricks MLOps
 
 ## 進度追蹤
 
-### Week 1
-- [ ] Day 1: Databricks 環境設置 + 對齊測試框架
-- [ ] Day 2: Preprocessor JAX 翻譯
-- [ ] **Gate 1: Preprocessor 對齊驗證通過**
-- [ ] Day 3: 獎勵函數 + Domain Randomization
-- [ ] Day 4-5: JAX SAC + Brax 整合
-- [ ] **Gate 2: 模型輸出對齊驗證通過**
+### 已完成
+- [x] Databricks 環境設置（JAX/MJX/W&B 可用）
+- [x] Preprocessor JAX 翻譯（`preprocessor_jax.py`）
+- [x] 獎勵函數實作（`soccer_env.py`）
+- [x] JAX SAC 訓練代碼（`sac_agent.py`, `train_sac.py`）
+- [x] 修復 `dist.mode()` NotImplementedError 錯誤
+- [x] 60k 步測試驗證通過（log_alpha=-3.38）
+- [x] 優化訓練配置（batch_size=512, updates_per_step=4）
 
-### Week 2
-- [ ] Day 1-3: MJX 預訓練 (10M 步)
-- [ ] Day 4: jax2torch 轉換
-- [ ] Day 5: 官方環境驗證
+### 進行中
+- [ ] 180k 步正式訓練（~3 小時）
+- [ ] W&B 監控 `eval/mean_reward` 趨勢
+
+### 待辦
+- [ ] jax2torch 轉換
+- [ ] 官方環境驗證
 - [ ] **Gate 3: 行為定性一致驗證通過**
-
-### Week 3
-- [ ] Day 1-3: 官方環境微調
-- [ ] Day 4: SAI 提交
-- [ ] Day 5: 迭代優化
+- [ ] 官方環境微調
+- [ ] SAI 提交
 
 ---
 

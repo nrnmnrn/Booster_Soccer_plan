@@ -80,7 +80,7 @@ from src.training.config import SACConfig
 
 config = SACConfig(
     # === 環境 ===
-    num_envs=2048,              # L4 GPU 推薦值
+    num_envs=32,              # L4 GPU 推薦值
     max_episode_steps=1000,
 
     # === 訓練 ===

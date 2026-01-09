@@ -30,6 +30,42 @@ from .config import SACConfig
 
 
 # =============================================================================
+# SafeTanh Bijector（數值穩定版本）
+# =============================================================================
+
+class SafeTanh(distrax.Bijector):
+    """Tanh bijector with numerical stability for log_prob
+
+    防止 tanh(x) = ±1 時 log(1-tanh²) = log(0) = -inf 導致 NaN。
+    添加小的 epsilon (1e-6) 確保 log 參數始終為正。
+
+    Reference:
+    - 標準 SAC 實現常見問題
+    - https://github.com/rail-berkeley/softlearning/issues/57
+    """
+
+    def __init__(self):
+        super().__init__(event_ndims_in=0, event_ndims_out=0)
+
+    def forward_and_log_det(self, x: jnp.ndarray):
+        """Forward transformation and log-det-Jacobian (required by distrax)"""
+        y = jnp.tanh(x)
+        # log(1 - tanh²(x)) with numerical stability
+        # 添加 1e-6 防止 log(0) 當 tanh(x) = ±1
+        log_det = jnp.log(1.0 - y**2 + 1e-6)
+        return y, log_det
+
+    def inverse_and_log_det(self, y: jnp.ndarray):
+        """Inverse transformation and log-det-Jacobian"""
+        # Clip to prevent atanh(±1) = ±inf
+        y_safe = jnp.clip(y, -1.0 + 1e-6, 1.0 - 1e-6)
+        x = jnp.arctanh(y_safe)
+        # log_det for inverse is negative of forward
+        log_det = -jnp.log(1.0 - y_safe**2 + 1e-6)
+        return x, log_det
+
+
+# =============================================================================
 # 網路定義
 # =============================================================================
 
@@ -103,9 +139,10 @@ class GaussianActor(nn.Module):
         )
 
         # Tanh squashing（將動作限制在 [-1, 1]）
+        # 使用 SafeTanh 防止 log_prob NaN（當 tanh(x) = ±1 時）
         return distrax.Transformed(
             distribution=base_dist,
-            bijector=distrax.Block(distrax.Tanh(), ndims=1)
+            bijector=distrax.Block(SafeTanh(), ndims=1)
         )
 
     def get_action_and_log_prob(
@@ -127,8 +164,10 @@ class GaussianActor(nn.Module):
         dist = self(obs)
 
         if deterministic:
-            # 確定性：使用 mean（經過 tanh）
-            action = dist.mode()
+            # 確定性：取 base distribution 的 mean，然後手動 tanh
+            # 不能使用 dist.mode()，因為 SafeTanh 的 Jacobian 不是常數
+            base_mean = dist.distribution.mean()  # Gaussian mean (未 squash)
+            action = jnp.tanh(base_mean)  # 手動 tanh squash
             log_prob = dist.log_prob(action)
         else:
             # 隨機：從分佈採樣
@@ -290,7 +329,7 @@ class SACAgent:
             alpha_optimizer_state=alpha_optimizer_state,
         )
 
-    @partial(jax.jit, static_argnums=(0,))
+    @partial(jax.jit, static_argnums=(0,), static_argnames=('deterministic',))
     def select_action(
         self,
         state: SACState,
@@ -304,7 +343,7 @@ class SACAgent:
             state: SAC 狀態
             obs: 觀察，shape (obs_dim,) 或 (batch_size, obs_dim)
             rng: JAX random key
-            deterministic: 是否確定性選擇
+            deterministic: 是否確定性選擇（靜態參數，用於條件分支）
 
         Returns:
             動作，shape (action_dim,) 或 (batch_size, action_dim)
@@ -319,7 +358,10 @@ class SACAgent:
         dist = state.actor.apply_fn(state.actor.params, obs)
 
         if deterministic:
-            action = dist.mode()
+            # 確定性：取 base distribution 的 mean，然後手動 tanh
+            # 不能使用 dist.mode()，因為 SafeTanh 的 Jacobian 不是常數
+            base_mean = dist.distribution.mean()  # Gaussian mean (未 squash)
+            action = jnp.tanh(base_mean)  # 手動 tanh squash
         else:
             action = dist.sample(seed=rng)
 
@@ -411,6 +453,8 @@ class SACAgent:
             next_dist = state.actor.apply_fn(state.actor.params, batch["next_obs"])
             next_action = next_dist.sample(seed=rng)
             next_log_prob = next_dist.log_prob(next_action)
+            # 裁剪 log_prob 防止 -inf（tanh 邊界問題）
+            next_log_prob = jnp.clip(next_log_prob, -100.0, 100.0)
 
             # 2. 使用 target critic 計算 next Q
             next_q1, next_q2 = state.critic.apply_fn(
@@ -461,6 +505,8 @@ class SACAgent:
             dist = state.actor.apply_fn(actor_params, batch["obs"])
             action = dist.sample(seed=rng)
             log_prob = dist.log_prob(action)
+            # 裁剪 log_prob 防止 -inf（tanh 邊界問題）
+            log_prob = jnp.clip(log_prob, -100.0, 100.0)
 
             # 計算 Q 值（使用更新後的 critic）
             q1, q2 = new_critic_state.apply_fn(
@@ -503,6 +549,8 @@ class SACAgent:
             dist = new_actor_state.apply_fn(new_actor_state.params, batch["obs"])
             action = dist.sample(seed=rng)
             log_prob = dist.log_prob(action)
+            # 裁剪 log_prob 防止 -inf（tanh 邊界問題）
+            log_prob = jnp.clip(log_prob, -100.0, 100.0)
 
             # Alpha loss：讓 entropy 接近 target_entropy
             # L = -alpha * (log_prob + target_entropy)
