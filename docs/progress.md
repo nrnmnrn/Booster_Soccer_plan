@@ -6,12 +6,30 @@
 
 ## 當前狀態
 
-**階段**：Week 2 - jax2torch 轉換完成，準備官方環境驗證
+**階段**：Week 2 - jax2torch 已修復，準備執行 Gate 3 驗證
 **日期**：2026-01-09
 
 ---
 
 ## 上次 Session 摘要
+
+### 2026-01-09 (Session 9)
+
+**完成項目**：
+- ✅ **修復 jax2torch read-only 錯誤**
+  - JAX array 是 read-only，無法直接傳給 `torch.tensor()`
+  - 修復：使用 `np.asarray(jax_array).copy()` 再轉換
+  - 已更新 `04_jax2torch_conversion.ipynb` 和 `troubleshooting.md`
+- ✅ **創建官方環境驗證 Notebook**
+  - `src/notebooks/05_official_env_validation.ipynb`
+  - 使用 Databricks Secrets (`sai-credentials/api-key`)
+  - 測試三個任務，驗證 Gate 3 標準
+
+**下一步**：
+1. 在 Databricks 執行 `04_jax2torch_conversion.ipynb` 生成 `model.pt`
+2. 執行 `05_official_env_validation.ipynb` 驗證 Gate 3
+
+---
 
 ### 2026-01-09 (Session 8)
 
@@ -334,6 +352,7 @@ python scripts/test_in_official_env.py --api-key YOUR_API_KEY --task GoaliePenal
 | `src/notebooks/02_xml_loading.ipynb` | MJX XML 載入測試（soccer_env.xml） |
 | `src/notebooks/03_task_index_validation.ipynb` | task_index 維度驗證 |
 | `src/notebooks/04_jax2torch_conversion.ipynb` | JAX → PyTorch 轉換（在 Databricks 執行） |
+| `src/notebooks/05_official_env_validation.ipynb` | 官方環境驗證 (Gate 3) |
 
 ### 提交相關文件
 
