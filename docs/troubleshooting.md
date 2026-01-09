@@ -136,7 +136,7 @@
 
 | 問題 | 解決方案 |
 |------|----------|
-| *尚無記錄* | - |
+| `TypeError: the read only flag is not supported, should always be False` | JAX array 是 read-only。轉換時使用 `np.asarray(jax_array).copy()` 再傳給 `torch.tensor()` |
 
 ---
 

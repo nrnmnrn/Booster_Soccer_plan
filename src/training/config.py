@@ -2,6 +2,33 @@
 
 使用 dataclass 提供類型安全的配置管理。
 所有超參數都在這裡定義，便於實驗追蹤和復現。
+
+## 實驗筆記（2026-01-09）
+
+### 問題診斷：Entropy Collapse
+
+第一次 180k 步訓練（Session 7）發現以下問題：
+- `train/episode_reward`：44.5-47.5 波動，**無上升趨勢**
+- `train/entropy`：8.2 → 7.6 持續下降
+- `log_alpha`：-4.9（α ≈ 0.007），entropy 權重過低
+- `eval/std_reward`：0.28，行為過於確定性
+
+### 根本原因
+`target_entropy = -12.0`（= -action_dim）導致 SAC 過早將策略收斂到確定性行為，
+停止探索，陷入局部最優。
+
+### 解決方案（方案 A：保守調整）
+| 參數 | 原值 | 新值 | 原因 |
+|------|------|------|------|
+| target_entropy | -12.0 | -6.0 | 保持更高 entropy（-dim/2） |
+| init_alpha | 0.2 | 1.0 | 初始探索更多 |
+| actor_lr | 3e-4 | 1e-4 | 穩定 actor 學習 |
+| updates_per_step | 4 | 2 | 減少過擬合當前數據 |
+
+### 理論背景
+- 12 維 Gaussian 的初始 entropy ≈ 8.4
+- target_entropy = -6：允許中等隨機性
+- target_entropy = -12：幾乎無隨機性（過於確定）
 """
 
 from dataclasses import dataclass, field
@@ -62,11 +89,18 @@ class SACConfig:
     # === SAC 超參數 ===
     gamma: float = 0.99
     tau: float = 0.005
-    actor_lr: float = 3e-4
+
+    # 學習率設定
+    # [實驗發現] actor_lr=3e-4 時 Q1_mean 先升後降，actor 學習不穩定
+    actor_lr: float = 1e-4  # 降低以穩定 actor 學習（原 3e-4）
     critic_lr: float = 3e-4
     alpha_lr: float = 3e-4
-    target_entropy: Optional[float] = None  # 自動設為 -action_dim
-    init_alpha: float = 0.2  # 初始 entropy coefficient
+
+    # Entropy 調節（解決 Entropy Collapse 的關鍵）
+    # [實驗發現] target_entropy=-12 導致 log_alpha 降到 -4.9，策略過早確定性收斂
+    # [理論] 12 維 Gaussian 初始 entropy ≈ 8.4，target=-6 允許中等隨機性
+    target_entropy: float = -6.0  # 提高目標（-dim/2），避免過早收斂（原 -12）
+    init_alpha: float = 1.0  # 增加初始探索（原 0.2）
 
     # === 網路架構 ===
     # 與 booster_soccer_showdown/imitation_learning/utils/networks.py 一致
@@ -77,16 +111,22 @@ class SACConfig:
     # === 訓練流程 ===
     total_timesteps: int = 10_000_000
     learning_starts: int = 10_000  # 前 10k 步隨機探索
-    batch_size: int = 512  # 增大 batch 減少梯度噪聲
+    batch_size: int = 512  # 增大 batch 減少梯度噪聲（原 256）
     buffer_size: int = 1_000_000
-    updates_per_step: int = 4  # 提高樣本效率（原本 1）
+
+    # 樣本效率 vs 過擬合權衡
+    # [實驗發現] updates_per_step=4 時 episode_reward 無上升趨勢，可能過擬合當前數據
+    # [理論] 較低的 UTD（Update-To-Data ratio）讓策略有更多時間收集多樣化經驗
+    updates_per_step: int = 2  # 減少過擬合（原 4）
 
     # === Domain Randomization ===
     dr_level: int = 1  # 1=基礎(±5%), 2=進階(±10%), 3=激進(±20%)
     random_task_index: bool = True  # 每次 reset 隨機選擇任務
 
     # === Checkpoint & Logging ===
-    save_frequency: int = 50_000  # 每 50k 步保存（更頻繁，避免訓練損失）
+    # [實驗發現] save_frequency=500k 時，140k 步訓練崩潰後無 checkpoint
+    # 建議：設為訓練總步數的 1/4 ~ 1/3
+    save_frequency: int = 50_000  # 更頻繁保存，避免訓練損失（原 500k）
     log_frequency: int = 1_000     # 每 1k 步記錄
     eval_frequency: int = 50_000   # 每 50k 步評估
     eval_episodes: int = 10        # 評估時運行的 episode 數
@@ -103,10 +143,6 @@ class SACConfig:
 
     def __post_init__(self):
         """初始化後處理"""
-        # 自動設置 target_entropy
-        if self.target_entropy is None:
-            self.target_entropy = -float(self.action_dim)
-
         # 驗證 CLAUDE.md 約束
         assert self.obs_dim == 87, f"obs_dim 必須為 87（CLAUDE.md 約束），got {self.obs_dim}"
         assert self.action_dim == 12, f"action_dim 必須為 12，got {self.action_dim}"

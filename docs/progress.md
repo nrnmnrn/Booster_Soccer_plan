@@ -6,12 +6,85 @@
 
 ## 當前狀態
 
-**階段**：Week 1 Day 3 - 官方格式驗證完成
-**日期**：2026-01-08
+**階段**：Week 2 - jax2torch 轉換完成，準備官方環境驗證
+**日期**：2026-01-09
 
 ---
 
 ## 上次 Session 摘要
+
+### 2026-01-09 (Session 8)
+
+**完成項目**：
+- ✅ **完成 jax2torch 轉換規劃與實作**
+  - 分析官方 `jax2torch.py` 和 `model.py` 結構
+  - 確認 SAC checkpoint 與官方格式完全兼容
+  - 發現 `BoosterModel` 使用 `model(obs)[0]` 自動只取 mean
+- ✅ **創建轉換 Notebook**
+  - `src/notebooks/04_jax2torch_conversion.ipynb`
+  - 支援在 Databricks 上直接執行
+  - 包含結構驗證 + 權重轉換 + TorchScript 保存
+- ✅ **準備提交文件結構**
+  - `submission/model.py` - BoosterModel 包裝
+  - `submission/preprocessor.py` - 87 維預處理器
+  - `scripts/test_in_official_env.py` - 官方環境測試腳本
+- ✅ **確認 Checkpoint 位置**
+  - 路徑：`/Workspace/Users/adamlin@cheerstech.com.tw/.bundle/Booster_Soccer_plan/dev/files/exp/sac_mjx/checkpoints/u4oasfsj/final_checkpoint.pkl`
+  - run_id: `u4oasfsj`
+
+**關鍵發現**：
+- **不需要手動截斷 log_std**：`TorchGCActor.forward()` 返回 `(mean, std)`，但 `BoosterModel` 只使用 `[0]` 即 mean
+- **權重轉換需轉置**：JAX kernel shape `(in, out)` → PyTorch weight shape `(out, in)`
+- **動態層探測**：`jax2torch.py` 自動探測 `Dense_0`, `Dense_1`... 順序，適應不同網路架構
+
+**Checkpoint 結構確認**：
+```
+checkpoint["agent"]["network"]["params"]["modules_actor"]
+├── actor_net/
+│   ├── Dense_0, Dense_1, Dense_2  (權重)
+│   └── LayerNorm_0, LayerNorm_1, LayerNorm_2
+├── mean_net  (動作輸出)
+└── log_std_net  (保留但不使用)
+```
+
+---
+
+### 2026-01-09 (Session 7)
+
+**完成項目**：
+- ✅ **修復 `dist.mode()` NotImplementedError**
+  - distrax Tanh-transformed distribution 不支援 `.mode()`
+  - 改用 `jnp.tanh(dist.distribution.mean())` 手動計算
+  - 修復位置：`sac_agent.py:168, 359`
+- ✅ **優化訓練配置**
+  - `batch_size`: 256 → 512（減少梯度噪聲）
+  - `updates_per_step`: 1 → 4（提高樣本效率）
+  - `save_frequency`: 500k → 50k（避免訓練損失）
+- ✅ **完成 180k 步 SAC 訓練**（~20 分鐘）
+  - log_alpha: -4.9（α ≈ 0.007，策略趨向確定性）
+  - Q1_mean: 3 → 21（Critic 學習正常）
+  - Episode Reward: 44.5-46.5（波動，無明顯上升）
+  - GPU Memory: ~75% (18GB)，Temperature: 73-78°C
+- ✅ **更新文檔**
+  - troubleshooting.md：新增 2 個錯誤記錄
+  - README.md：重構進度追蹤
+
+**訓練結果評估**：
+| 指標 | 值 | 狀態 |
+|------|-----|------|
+| 訓練完成 | 180k 步 | ✅ |
+| Deterministic Action | Shape (12,), Range [-0.345, 0.287] | ✅ |
+| Q 值學習 | 持續上升 | ✅ |
+| Episode Reward | 無明顯上升 | ⚠️ 需觀察 |
+
+**關鍵發現**：
+- Episode reward 沒有明顯上升趨勢，可能是：
+  1. 獎勵函數設計問題（需要 reward shaping）
+  2. 訓練時間不足（180k 步可能不夠）
+  3. MJX 環境與官方環境差異
+- 建議：先完成 jax2torch 轉換，在官方環境驗證行為後再決定是否重新訓練
+
+---
 
 ### 2026-01-08 (Session 6)
 
@@ -164,49 +237,56 @@
 
 > 下一個 Claude session 應執行以下任務
 
-### 優先級 1：驗證 info dict 字段維度（在 Databricks 上）
-- 運行官方環境，打印 info dict 各字段的 shape
-- 特別確認 `defender_xpos` 是 3 維還是 9 維
-- 確認缺失字段的處理（如 KickToTarget 沒有 goalkeeper）
+### 優先級 1：執行 jax2torch 轉換（在 Databricks）
+轉換 Notebook 已準備好，需要在 Databricks 上執行：
 
-**驗證腳本**：
-```python
-from sai_rl import SAIClient
+**步驟**：
+1. 上傳 `src/notebooks/04_jax2torch_conversion.ipynb` 到 Databricks
+2. 執行 Notebook（會自動驗證結構 + 轉換權重）
+3. 下載生成的 `model.pt` 到本地 `submission/` 目錄
 
-sai = SAIClient(comp_id="lower-t1-penalty-kick-goalie", api_key="YOUR_KEY")
-env = sai.make_env()
-obs, info = env.reset()
-
-for key, value in info.items():
-    if hasattr(value, 'shape'):
-        print(f"{key}: shape={value.shape}")
-    else:
-        print(f"{key}: {value}")
+**Checkpoint 路徑**：
+```
+/Workspace/Users/adamlin@cheerstech.com.tw/.bundle/Booster_Soccer_plan/dev/files/exp/sac_mjx/checkpoints/u4oasfsj/final_checkpoint.pkl
 ```
 
-### 優先級 2：修正現有 MJX preprocessor
-根據驗證結果修正：
-- `src/mjx/preprocessor_jax.py` 的維度假設
-- `src/mjx/soccer_env.py` 的 EnvInfo 結構
+**輸出路徑**：
+```
+/Workspace/Users/adamlin@cheerstech.com.tw/.bundle/Booster_Soccer_plan/dev/files/submission/model.pt
+```
 
-### 優先級 3：開始 RL 訓練
-- 創建 `src/training/ppo_mjx.py` 或使用 brax 的 PPO
-- 測試 reward 函數的有效性
-- 開始 MJX 預訓練（10M 步目標）
+### 優先級 2：官方環境驗證（Gate 3）
+下載 `model.pt` 後，在本地執行測試：
 
-### 優先級 4：JAX → PyTorch 轉換
-- 參考 `booster_soccer_showdown/imitation_learning/scripts/jax2torch.py`
-- 確保轉換後模型與 `submission/model.py` 兼容
+```bash
+python scripts/test_in_official_env.py --api-key YOUR_API_KEY --task GoaliePenaltyKick
+```
+
+**成功標準**：
+- ✅ 機器人站立 > 50 步
+- ✅ 有移動/踢球意圖
+- ⚠️ 不要求高分數
+
+### 優先級 3：官方環境微調（如 Gate 3 失敗）
+如果機器人立即倒下或行為異常：
+1. 檢查 obs 預處理是否正確（四元數順序 [x,y,z,w]）
+2. 在官方環境進行 DDPG 微調
+3. 調整獎勵函數重新訓練
+
+### 優先級 4：SAI 提交
+驗證通過後提交到競賽平台。
 
 ---
 
-## 已解決問題（Session 6 更新）
+## 已解決問題（Session 8 更新）
 
 | 問題 | 狀態 | 備註 |
 |------|------|------|
 | ~~task_one_hot 維度~~ | ✅ 已解決 | **3 維**，不是 7 維 |
 | ~~Quaternion 順序~~ | ✅ 已解決 | sai_mujoco 用 **[x,y,z,w]** |
 | ~~官方 Preprocessor 結構~~ | ✅ 已解決 | 87 維，見 troubleshooting.md |
+| ~~jax2torch 結構兼容~~ | ✅ 已解決 | SAC checkpoint 與官方格式完全兼容 |
+| ~~SAC→DDPG log_std 處理~~ | ✅ 已解決 | BoosterModel 自動只取 mean（`[0]`） |
 
 ---
 
@@ -253,3 +333,13 @@ for key, value in info.items():
 | `src/notebooks/01_environment_validation.ipynb` | Databricks 環境驗證 |
 | `src/notebooks/02_xml_loading.ipynb` | MJX XML 載入測試（soccer_env.xml） |
 | `src/notebooks/03_task_index_validation.ipynb` | task_index 維度驗證 |
+| `src/notebooks/04_jax2torch_conversion.ipynb` | JAX → PyTorch 轉換（在 Databricks 執行） |
+
+### 提交相關文件
+
+| 文件 | 說明 |
+|------|------|
+| `submission/model.py` | BoosterModel 包裝（PD 控制器） |
+| `submission/preprocessor.py` | 87 維預處理器 |
+| `submission/model.pt` | 轉換後的 TorchScript 模型（待生成） |
+| `scripts/test_in_official_env.py` | 官方環境測試腳本 |
