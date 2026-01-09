@@ -58,6 +58,17 @@
 | `AuthenticationError: No API key provided` | 設置 `SAI_API_KEY` 環境變數或傳入 `api_key` 參數 |
 | `sai.make_env("LowerT1KickToTarget-v0")` 失敗 | **官方 Bug（2026-01-08）**。使用 `comp_id` 參數初始化 SAIClient 後的 `make_env()` 無法直接指定環境。需聯繫官方或使用 workaround。 |
 | `/soccer_ball` body name 找不到 | dm_control/PyMJCF attach 時自動加 `/` 前綴。需 patch sai_mujoco 源碼或使用帶前綴名稱。 |
+| `mat1 and mat2 shapes cannot be multiplied (1x45 and 87x256)` | **Preprocessor 簽名錯誤**！SAI 框架調用 `modify_state(obs, info)` 但你的函數是 `modify_state(obs, info, task_one_hot)`。從 `info['task_index']` 內部獲取 task_one_hot。見下方說明 |
+
+> **⚠️ Preprocessor API 契約（2026-01）**：
+> - SAI 框架調用 `preprocessor.modify_state(obs, info)` — **只有 2 個參數**
+> - 如果你的簽名是 `(obs, info, task_one_hot)`，會導致 TypeError 或 preprocessor 不被執行
+> - **解法**：在函數內部從 `info['task_index']` 獲取 task_one_hot
+> ```python
+> def modify_state(self, obs, info):
+>     task_one_hot = self.get_task_onehot(info)  # 內部獲取
+>     # ... 其餘處理
+> ```
 
 > **⚠️ SAI 套件版本要求（2026-01）**：
 > - 官方環境需要 **NumPy 2.x**（numpy==2.1.3）

@@ -25,10 +25,12 @@ import numpy as np
 class Preprocessor():
 
     def get_task_onehot(self, info):
+        """從 info dict 獲取 task one-hot 編碼"""
         if 'task_index' in info:
             return info['task_index']
         else:
-            return np.array([])
+            # 返回 3 維 zeros 作為默認值，保證維度一致
+            return np.zeros(3)
 
     def quat_rotate_inverse(self, q: np.ndarray, v: np.ndarray):
         q_w = q[-1]
@@ -38,8 +40,11 @@ class Preprocessor():
         c = q_vec * (np.dot(q_vec, v) * 2.0)    
         return a - b + c 
 
-    def modify_state(self, obs, info, task_one_hot):
-        
+    def modify_state(self, obs, info):
+        """將 raw obs 轉換為 87 維（符合 SAI 框架 API 契約）"""
+        # 從 info 內部獲取 task_one_hot
+        task_one_hot = self.get_task_onehot(info)
+
         robot_qpos = obs[:12]
         robot_qvel = obs[12:24]
         quat = info["robot_quat"]

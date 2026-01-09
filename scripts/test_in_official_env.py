@@ -66,8 +66,12 @@ def test_single_task(
         step_count = 0
 
         for step in range(max_steps):
-            # 預處理觀察
-            processed_obs = preprocessor.modify_state(obs, info, task_one_hot)
+            # 如果 info 中沒有 task_index，手動注入（SAI 框架會自動提供）
+            if "task_index" not in info:
+                info["task_index"] = task_one_hot
+
+            # 預處理觀察（使用與 SAI 框架一致的 2 參數簽名）
+            processed_obs = preprocessor.modify_state(obs, info)
 
             # 模型推理
             action = model(processed_obs[np.newaxis, :]).numpy().squeeze()
